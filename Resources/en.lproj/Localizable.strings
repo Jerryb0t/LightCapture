@@ -183,3 +183,9 @@
 "音频合成写入失败，原文件已保留。" = "Could not write mixed audio. The original file was kept.";
 "音频编码器持续繁忙，录屏已停止；原文件保留。" = "Audio encoding remained busy. Recording stopped; the original file was kept.";
 "启动时自动检查更新" = "Auto-check at launch";
+
+"下载并安装…" = "Download and Install…";
+
+"发现 %@。可下载并验证安装，更新会重新启动轻截。" = "Version %@ is available. Download and verify it to install; LightCapture will restart.";
+
+"此构建未包含更新组件，请从官方发布获取新版。" = "This build does not include the updater. Get the latest official release.";

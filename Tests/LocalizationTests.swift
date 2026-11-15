@@ -54,7 +54,7 @@ private func precondition(_ condition:@autoclosure ()->Bool,_ message:@autoclosu
    precondition(content.bounds.contains(footer),"busy state pushes footer out of window")
    precondition(content.bounds.contains(app.updateCheckButton.convert(app.updateCheckButton.bounds,to:content)))
   }
-  app.updateStatus.stringValue=L("发现 %@。自动安装尚未启用，可查看官方发布。","v0.2.1")
+  app.updateStatus.stringValue=L("发现 %@。可下载并验证安装，更新会重新启动轻截。","v0.2.1")
   app.updateStatus.isHidden=false;app.updateReleaseButton.isHidden=false;content.layoutSubtreeIfNeeded()
   precondition(content.bounds.contains(app.updateStatus.convert(app.updateStatus.bounds,to:content)),"update status outside window")
   precondition(content.bounds.contains(app.automaticUpdateCheckbox.convert(app.automaticUpdateCheckbox.bounds,to:content)),"auto-check switch outside window")

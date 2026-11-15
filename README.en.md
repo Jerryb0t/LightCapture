@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-A lightweight, native macOS tool for screenshots and screen recording. Built with Swift, AppKit, and ScreenCaptureKit. No account, server, or third-party runtime dependencies.
+A lightweight, native macOS tool for screenshots and screen recording. Built with Swift, AppKit, and ScreenCaptureKit. Capture uses OS frameworks without an account. Only update checks and explicitly requested updates contact GitHub.
 
 [简体中文](README.md)
 
@@ -32,7 +32,7 @@ Synthetic pixel, Retina, window-layer, lifecycle, selection and bilingual layout
 
 ## Check for updates
 
-Choose **Check for Updates** at the bottom of the main window for a manual check. **Check at launch** is optional and off by default. When enabled, it checks this project's GitHub Releases API at launch or reopen, at most once per 24 hours. There is no persistent timer or background polling; when disabled, no automatic checks occur. This option does not install updates. The repository currently publishes source only. One-click installation is not enabled without a trusted, installable release.
+Choose **Check for Updates** at the bottom of the main window for a manual check. **Check at launch** is optional and off by default. When enabled, it checks this project's GitHub Releases API at launch or reopen, at most once per 24 hours. There is no persistent timer or background polling; when disabled, no automatic checks occur. This option does not install updates. Starting with 0.2.3, official packages use [GitHub Releases](https://github.com/Jerryb0t/LightCapture/releases) and signed Sparkle updates. Install newer versions only when you choose to. If you are on 0.2.2 or earlier, install the first official update-enabled package from Releases.
 
 ## Build from source
 

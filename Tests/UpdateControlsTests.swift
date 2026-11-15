@@ -10,11 +10,12 @@ import AppKit
         guard let preferences=UserDefaults(suiteName:suite) else{exit(1)}
         defer{preferences.removePersistentDomain(forName:suite)}
         app.updatePreferences=preferences
-        var requests=[String](),opened=[URL]()
+        var requests=[String](),installs=0
+        var completeInstall:((Error?)->Void)?
         let page=URL(string:"https://github.com/Jerryb0t/LightCapture/releases/tag/v0.2.1")!
         let candidate=ManualUpdateCandidate(version:try UpdateVersion("v0.2.1"),tag:"v0.2.1",releaseURL:page,archiveURL:URL(string:"https://github.com/Jerryb0t/LightCapture/releases/download/v0.2.1/LightCapture-macos-arm64.zip")!,archiveSize:100,sha256:String(repeating:"a",count:64))
         app.checkForUpdate={ version in requests.append(version);return candidate }
-        app.openReleasePage={ url in opened.append(url);return true }
+        app.beginVerifiedInstall={done in installs += 1;completeInstall=done}
         app.buildUI()
         app.checkAutomaticallyIfDue(now:Date(timeIntervalSince1970:100_000))
         check(requests.isEmpty && app.automaticUpdateCheckbox.state == .off,"default OFF never creates network work")
@@ -23,9 +24,12 @@ import AppKit
         app.setBusy(false);app.checkUpdates();app.checkUpdates()
         for _ in 0..<50 where app.updateReleaseButton.isHidden {try await Task.sleep(nanoseconds:2_000_000)}
         check(requests==[app.installedVersion] && !app.updateReleaseButton.isHidden,"one check, candidate found")
-        check(opened.isEmpty,"check does not open the browser")
+        check(installs==0,"check does not install")
         app.viewUpdateRelease()
-        check(opened==[page],"explicit click opens the fixed release")
+        check(installs==1 && !app.updateCheckButton.isEnabled,"explicit install gates capture and duplicate actions")
+        app.viewUpdateRelease();check(installs==1,"duplicate install blocked")
+        completeInstall?(nil)
+        check(app.updateCheckButton.isEnabled,"cancel/completion restores controls")
         app.checkForUpdate={ _ in throw ManualUpdateError.noPublishedRelease }
         app.checkUpdates()
         for _ in 0..<50 where !app.updateCheckButton.isEnabled {try await Task.sleep(nanoseconds:2_000_000)}

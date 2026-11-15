@@ -23,12 +23,14 @@ import AVFoundation
     private var updateTask:Task<Void,Never>?
     private var automaticCheckInFlight=false
     let updateCheckButton=NSButton(title:L("检查更新…"),target:nil,action:nil)
-    let updateReleaseButton=NSButton(title:L("查看发布"),target:nil,action:nil)
+    let updateReleaseButton=NSButton(title:L("下载并安装…"),target:nil,action:nil)
     let updateStatus=NSTextField(wrappingLabelWithString:"")
     private var updateCheckInProgress=false
     private var updateCandidate:ManualUpdateCandidate?
     var checkForUpdate:(String) async throws -> ManualUpdateCandidate? = {try await ManualUpdateService().check(currentVersion:$0)}
-    var openReleasePage:(URL)->Bool = {NSWorkspace.shared.open($0)}
+    private var signedInstaller:SignedUpdateInstaller?
+    var beginVerifiedInstall:((@escaping (Error?)->Void)throws->Void)?
+
     var installedVersion:String {Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.1.0"}
     let copyOnly = NSButton(checkboxWithTitle:L("截图仅复制到剪贴板，不保存文件"),target:nil,action:nil)
     var loginItem:LoginItemManaging = SystemLoginItem()
@@ -166,7 +168,7 @@ import AVFoundation
                 guard !Task.isCancelled else{return}
                 self.updateCandidate=candidate
                 if let candidate{
-                    self.updateStatus.stringValue=L("发现 %@。自动安装尚未启用，可查看官方发布。",candidate.tag)
+                    self.updateStatus.stringValue=L("发现 %@。可下载并验证安装，更新会重新启动轻截。",candidate.tag)
                     self.updateStatus.isHidden=false;self.updateReleaseButton.isHidden=false
                 }else if !automatic {self.updateStatus.stringValue=L("你已使用最新发布版本。")}
             }catch ManualUpdateError.noPublishedRelease {
@@ -177,8 +179,19 @@ import AVFoundation
         }
     }
     @objc func viewUpdateRelease(){
-        guard !busy,let page=updateCandidate?.releaseURL else{return}
-        if !openReleasePage(page){updateStatus.stringValue=L("未能打开浏览器，请稍后重试。")}
+        guard !busy,!updateCheckInProgress,updateCandidate != nil else{return}
+        setBusy(true)
+        let completion:(Error?)->Void = {[weak self] error in
+            guard let self else{return};self.setBusy(false)
+            if let error {self.updateStatus.stringValue=error.localizedDescription;self.updateStatus.isHidden=false}
+        }
+        do {
+            if let beginVerifiedInstall {try beginVerifiedInstall(completion)}else{
+                if signedInstaller == nil {signedInstaller=SignedUpdateInstaller()}
+                signedInstaller?.finished=completion
+                try signedInstaller?.begin()
+            }
+        }catch{completion(error)}
     }
     private func refreshUpdateControls(){
         automaticUpdateCheckbox.isEnabled = !busy
@@ -489,7 +502,7 @@ import AVFoundation
     }
     @objc func quit(){NSApp.terminate(nil)}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
-        if busy {let a=NSAlert();a.messageText=L("请先结束当前任务");a.informativeText=L("录屏请先停止并保存；长截图请保存或取消，避免丢失。");a.runModal();return .terminateCancel};updateTask?.cancel();return .terminateNow
+        if busy && signedInstaller?.mayTerminateForInstallation != true {let a=NSAlert();a.messageText=L("请先结束当前任务");a.informativeText=L("录屏请先停止并保存；长截图请保存或取消，避免丢失。");a.runModal();return .terminateCancel};updateTask?.cancel();return .terminateNow
     }
     func windowShouldClose(_ sender:NSWindow)->Bool {
         guard sender === window else{return true}
