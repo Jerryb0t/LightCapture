@@ -50,7 +50,7 @@ struct CaptureTarget {
                 } else { self.cancel(notify: true) }
             }
             view.hovered = view.candidates.first(where:{$0.0.contains(CGPoint(x:NSEvent.mouseLocation.x-screen.frame.minX,y:NSEvent.mouseLocation.y-screen.frame.minY))})
-            win.contentView = view; win.makeKeyAndOrderFront(nil); win.makeFirstResponder(view)
+            win.contentView = view; view.updateTrackingAreas(); win.makeKeyAndOrderFront(nil); win.makeFirstResponder(view)
             windows.append(win)
         }
         if windows.isEmpty { cancel(notify: true); return }
@@ -76,6 +76,12 @@ struct CaptureTarget {
 }
 final class SelectionWindow: NSWindow {
     override var canBecomeKey: Bool { true }
+    override func sendEvent(_ event:NSEvent) {
+        // Window-local routing survives accessory activation and initial tracking-area setup.
+        // No global monitor, timer or additional screen access is needed.
+        if event.type == .mouseMoved {(contentView as? SelectionView)?.mouseMoved(with:event)}
+        super.sendEvent(event)
+    }
     override func cancelOperation(_ sender:Any?){(contentView as? SelectionView)?.cancelSelection()}
     override func performKeyEquivalent(with event:NSEvent)->Bool {
         if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
@@ -157,7 +163,10 @@ final class SelectionView: NSView {
     }
     override func mouseMoved(with event:NSEvent) {
         guard pendingRect == nil else{return}
-        let p=convert(event.locationInWindow,from:nil);hovered=candidates.first(where:{$0.0.contains(p)});needsDisplay=true
+        let p=convert(event.locationInWindow,from:nil)
+        let next=candidates.first(where:{$0.0.contains(p)})
+        guard hovered?.0 != next?.0 || hovered?.1?.windowID != next?.1?.windowID else{return}
+        hovered=next;needsDisplay=true
     }
     private var start: CGPoint?; private var current: CGPoint?
     override var acceptsFirstResponder: Bool { true }

@@ -24,6 +24,9 @@ struct WindowSnapPolicy {
         // Exclude menu/status bars themselves, not a popover extending below them.
         if layer>=20 && frame.width>=displayBounds.width*0.8 && frame.height<=80{return false}
         if layer>0 && (frame.width>displayBounds.width*1.05 || frame.height>displayBounds.height*1.05){return false}
+        // Elevated screen-sized windows may be transparent carriers for menus.
+        // Their rectangles hide normal windows underneath; layer-zero fullscreen apps remain valid.
+        if layer>0 && frame.intersection(displayBounds).width>=displayBounds.width*0.9 && frame.intersection(displayBounds).height>=displayBounds.height*0.9{return false}
         return true
     }
 }

@@ -13,7 +13,7 @@ struct SnapWindowRecord {
 
 enum WindowSnapCandidates {
     static func records(_ windows:[SCWindow])->[SnapWindowRecord] {
-        windows.map{SnapWindowRecord(id:$0.windowID,frame:$0.frame,layer:0,alpha:1,
+        windows.map{SnapWindowRecord(id:$0.windowID,frame:$0.frame,layer:$0.windowLayer,alpha:1,
             owner:$0.owningApplication?.applicationName ?? "",pid:$0.owningApplication?.processID,onScreen:$0.isOnScreen)}
     }
     /// Quartz supplies front-to-back ordering where available. SCK is a fallback,
