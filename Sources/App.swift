@@ -4,6 +4,7 @@ import Carbon
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     var window: NSWindow!
+    let visibility=AppVisibility()
     let storage = CaptureStorage.shared
     let selector = SelectionController()
     let recorder = CaptureEngine()
@@ -45,9 +46,10 @@ import Carbon
     private var feedbackDismiss:DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        let login=LoginLaunch.isLoginEvent(NSAppleEventManager.shared().currentAppleEvent)
+        visibility.start(login:login)
         buildUI(); buildMenu(); registerHotkeys()
-        if !LoginLaunch.isLoginEvent(NSAppleEventManager.shared().currentAppleEvent){showWindow()}
+        if !login{showWindow()}
         NotificationCenter.default.addObserver(self,selector:#selector(recordingScreensChanged),name:NSApplication.didChangeScreenParametersNotification,object:nil)
     }
     func buildUI() {
@@ -58,7 +60,7 @@ import Carbon
         window.contentView!.addSubview(root)
         NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),root.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),root.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:22)])
         let title=NSTextField(labelWithString:"轻截"); title.font = .systemFont(ofSize:28,weight:.semibold);root.addArrangedSubview(title)
-        let subtitle=NSTextField(labelWithString:"轻一点，只留下需要的。") ;subtitle.textColor = .secondaryLabelColor;root.addArrangedSubview(subtitle)
+        let subtitle=NSTextField(labelWithString:"关闭窗口后隐藏后台；双击应用图标重新打开。") ;subtitle.textColor = .secondaryLabelColor;root.addArrangedSubview(subtitle)
         let grid=NSGridView(views:[
             [actionButton("区域 / 窗口截图",symbol:"viewfinder",action:#selector(screenshot)), actionButton("全屏截图",symbol:"rectangle",action:#selector(fullScreenshot))],
             [actionButton("长截图",symbol:"rectangle.expand.vertical",action:#selector(longScreenshot)), NSView()],
@@ -100,7 +102,7 @@ import Carbon
     }
     func buildMenu() {
         let menu=NSMenu();let app=NSMenuItem();menu.addItem(app)
-        let submenu=NSMenu();submenu.addItem(withTitle:"显示轻截",action:#selector(showWindow),keyEquivalent:"0").target=self
+        let submenu=NSMenu();submenu.addItem(withTitle:"显示轻截",action:#selector(revealSettings),keyEquivalent:"0").target=self
         let mainStop=submenu.addItem(withTitle:"停止并保存录屏",action:#selector(stopRecording),keyEquivalent:"");mainStop.target=self;mainStop.isEnabled=false;stopMenuItems.append(mainStop)
         submenu.addItem(withTitle:"退出轻截",action:#selector(quit),keyEquivalent:"q").target=self;app.submenu=submenu;NSApp.mainMenu=menu
         submenu.insertItem(withTitle:"待保存文件",action:#selector(openRecovery),keyEquivalent:"",at:2).target=self
@@ -163,6 +165,7 @@ import Carbon
     func endShortcut(){if let monitor=shortcutMonitor{NSEvent.removeMonitor(monitor)};shortcutMonitor=nil;shortcutButton.title="修改…";registerHotkeys()}
 
     @objc func settingsChanged(){UserDefaults.standard.set(quality.indexOfSelectedItem,forKey:"quality");UserDefaults.standard.set(audio.state == .on,forKey:"audio");UserDefaults.standard.set(copyOnly.state == .on,forKey:"copyOnly")}
+    @objc func revealSettings(){visibility.reopen();showWindow()}
     @objc func showWindow(){window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
     @objc func chooseFolder(){
         guard !busy else{return};let panel=NSOpenPanel();panel.canChooseFiles=false;panel.canChooseDirectories=true;panel.canCreateDirectories=true;panel.allowsMultipleSelection=false;panel.message="选择保存根文件夹，将自动分为截图、长截图和录屏。";panel.directoryURL=storage.root
@@ -173,7 +176,7 @@ import Carbon
     }
     @objc func openFolder(){do{try FileManager.default.createDirectory(at:storage.root,withIntermediateDirectories:true);NSWorkspace.shared.open(storage.root)}catch{report(error)}}
     @objc func openRecovery(){do{try FileManager.default.createDirectory(at:CaptureStorage.recoveryDirectory,withIntermediateDirectories:true);NSWorkspace.shared.open(CaptureStorage.recoveryDirectory)}catch{report(error)}}
-    func setBusy(_ value:Bool){busy=value;for b in buttons{b.isEnabled = !value};quality.isEnabled = !value;audio.isEnabled = !value;copyOnly.isEnabled = !value;shortcutButton.isEnabled = !value}
+    func setBusy(_ value:Bool){busy=value;for b in buttons{b.isEnabled = !value};quality.isEnabled = !value;audio.isEnabled = !value;copyOnly.isEnabled = !value;shortcutButton.isEnabled = !value;if !value{visibility.finished()}}
     func report(_ error:Error){status.stringValue=error.localizedDescription;showWindow()}
     func permission()->Bool{
         if CGPreflightScreenCaptureAccess(){return true}
@@ -192,7 +195,7 @@ import Carbon
         setBusy(true);guard permission() else{setBusy(false);return}
         let restoreLaunchWindow=window.isVisible
         status.stringValue="正在读取可用窗口…（最多等待 8 秒）";cancelPreparationButton.isHidden=false
-        showWindow();CaptureDiagnostics.record(.windowListBegin)
+        if !visibility.background{showWindow()};CaptureDiagnostics.record(.windowListBegin)
         contentRequest.start(seconds:8,operation:{try await CaptureEngine.content()}){[weak self] result in
             guard let self else{return};self.cancelPreparationButton.isHidden=true
             switch result {
@@ -203,7 +206,7 @@ import Carbon
                 if region {
                     self.selector.begin(displays:content.displays,availableWindows:windowSnap ? content.windows : [],mode:mode){[weak self] target in
                         guard let self else{return}
-                        if let target{then(target)}else{self.setBusy(false);self.status.stringValue="已取消。";if restoreLaunchWindow{self.showWindow()}}
+                        if let target{then(target)}else{self.setBusy(false);self.status.stringValue="已取消。";if restoreLaunchWindow && !self.visibility.background{self.showWindow()}}
                     }
                 }else{
                     let screen=NSScreen.screens.first{$0.frame.contains(NSEvent.mouseLocation)} ?? NSScreen.main
@@ -315,7 +318,7 @@ import Carbon
         })
     }
     @objc func appendLong(){longSampler.sample()}
-    @objc func cancelLong(){longSampler.stop();lastLongSignature=nil;composite=nil;longTarget=nil;dismissControls();setBusy(false);status.stringValue="已取消长截图，未保存。";showWindow()}
+    @objc func cancelLong(){longSampler.stop();lastLongSignature=nil;composite=nil;longTarget=nil;dismissControls();setBusy(false);status.stringValue="已取消长截图，未保存。";if !visibility.background{showWindow()}}
     @objc func previewLong(){
         guard let image=composite else{return};longSampler.stop();dismissControls()
         let preview=NSPanel(contentRect:NSRect(x:0,y:0,width:650,height:650),styleMask:[.titled],backing:.buffered,defer:false);preview.title="检查长截图后保存";preview.isReleasedWhenClosed=false
@@ -356,7 +359,7 @@ import Carbon
         }
 
     }
-    var recordingStopHint:String {"正在录屏。按 \(UserDefaults.standard.string(forKey:"shortcutTitle") ?? "⌃ A") 停止并保存；也可点 Dock 中的轻截打开停止按钮。"}
+    var recordingStopHint:String {"正在录屏。按 \(UserDefaults.standard.string(forKey:"shortcutTitle") ?? "⌃ A") 停止并保存；也可双击轻截应用图标打开停止按钮。"}
     @objc func recordingScreensChanged(){
         // A removed display can make AppKit relocate windows over the capture.
         // Hide rather than risk placing controls into a changed screen layout.
@@ -392,9 +395,9 @@ import Carbon
     }
     func windowShouldClose(_ sender:NSWindow)->Bool {
         guard sender === window else{return true}
-        if shortcutMonitor != nil{endShortcut()};sender.orderOut(nil);return false
+        if shortcutMonitor != nil{endShortcut()};sender.orderOut(nil);visibility.hide();return false
     }
     func windowWillClose(_ notification:Notification){if shortcutMonitor != nil {endShortcut()}}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showWindow();return true}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{revealSettings();return true}
 }

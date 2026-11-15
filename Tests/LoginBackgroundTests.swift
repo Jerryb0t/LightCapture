@@ -11,7 +11,7 @@ import Carbon
  @MainActor static func main() {
   setbuf(stdout,nil)
   NSApplication.shared.setActivationPolicy(.prohibited)
-  let app=AppDelegate(),fake=FakeLogin();app.loginItem=fake;app.buildUI()
+  let app=AppDelegate(),fake=FakeLogin();app.loginItem=fake;app.visibility.setPolicy={_ in};app.visibility.deactivate={};app.buildUI()
   precondition(fake.enables==0 && fake.disables==0 && app.loginCheckbox.state == .off)
   for status:SMAppService.Status in [.enabled,.requiresApproval,.notRegistered,.notFound]{fake.status=status;app.refreshLoginItem();precondition(app.loginCheckbox.state == LoginLaunch.presentation(status).0)}
   print("PASS login state rendering, no registration on launch/refresh (injected service)")
