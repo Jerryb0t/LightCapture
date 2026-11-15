@@ -56,16 +56,17 @@ import Carbon
     func buildUI() {
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:510,height:710),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
         window.title=L("轻截"); window.center(); window.delegate=self; window.isReleasedWhenClosed=false
-        let root=NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing=12
+        let root=NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing=10
         root.translatesAutoresizingMaskIntoConstraints=false
         window.contentView!.addSubview(root)
         NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),root.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),root.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:22)])
-        let title=NSTextField(labelWithString:L("轻截")); title.font = .systemFont(ofSize:28,weight:.semibold);root.addArrangedSubview(title)
-        let subtitle=NSTextField(wrappingLabelWithString:L("关闭窗口后隐藏后台；双击应用图标重新打开。")) ;subtitle.textColor = .secondaryLabelColor;root.addArrangedSubview(subtitle);subtitle.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
+        let title=NSTextField(labelWithString:L("轻截")); title.font = .systemFont(ofSize:30,weight:.semibold);root.addArrangedSubview(title)
+        let subtitle=NSTextField(wrappingLabelWithString:L("轻巧，只在需要时工作。闲置时不捕获屏幕。")) ;subtitle.textColor = .secondaryLabelColor;root.addArrangedSubview(subtitle);subtitle.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
+        let captureHeading=NSTextField(labelWithString:L("截图与录屏"));captureHeading.font = .systemFont(ofSize:12,weight:.semibold);captureHeading.textColor = .secondaryLabelColor;root.addArrangedSubview(captureHeading)
         let grid=NSGridView(views:[
             [actionButton(L("区域 / 窗口截图"),symbol:"viewfinder",action:#selector(screenshot)), actionButton(L("全屏截图"),symbol:"rectangle",action:#selector(fullScreenshot))],
-            [actionButton(L("长截图"),symbol:"rectangle.expand.vertical",action:#selector(longScreenshot)), NSView()],
-            [actionButton(L("全屏录屏"),symbol:"record.circle",action:#selector(fullRecording)), actionButton(L("区域录屏"),symbol:"rectangle.dashed",action:#selector(regionRecording))]
+            [actionButton(L("区域录屏"),symbol:"rectangle.dashed",action:#selector(regionRecording)), actionButton(L("全屏录屏"),symbol:"record.circle",action:#selector(fullRecording))],
+            [actionButton(L("长截图"),symbol:"rectangle.expand.vertical",action:#selector(longScreenshot)), NSView()]
         ])
         grid.rowSpacing=10;grid.columnSpacing=10;root.addArrangedSubview(grid)
         for b in buttons { b.widthAnchor.constraint(equalToConstant:223).isActive=true;b.heightAnchor.constraint(equalToConstant:48).isActive=true }
@@ -96,7 +97,8 @@ import Carbon
         cancelPreparationButton.target=self;cancelPreparationButton.action=#selector(cancelPreparation);cancelPreparationButton.keyEquivalent="\u{1b}";cancelPreparationButton.keyEquivalentModifierMask=[];cancelPreparationButton.isHidden=true;root.addArrangedSubview(cancelPreparationButton)
         status.font = .systemFont(ofSize:12);root.addArrangedSubview(status);status.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
         detail.font = .systemFont(ofSize:10);detail.textColor = .secondaryLabelColor;root.addArrangedSubview(detail);detail.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
-        root.addArrangedSubview(authorLinks.button)
+        let footer=NSStackView(views:[authorLinks.followButton,authorLinks.button]);footer.spacing=20
+        root.addArrangedSubview(footer)
         recorder.started = { [weak self] in Task { @MainActor in self?.didStartRecording() } }
     }
     func actionButton(_ title:String,symbol:String,action:Selector)->NSButton {
@@ -193,6 +195,7 @@ import Carbon
     }
     func prepare(region:Bool,windowSnap:Bool=false,mode:CaptureMode = .screenshot,then:@escaping(CaptureTarget)->Void){
         guard !busy,shortcutMonitor == nil else{return}
+        authorLinks.dismiss()
         feedbackDismiss?.cancel();feedbackDismiss=nil;feedbackPanel?.close();feedbackPanel=nil
         setBusy(true);guard permission() else{setBusy(false);return}
         let restoreLaunchWindow=window.isVisible
@@ -397,7 +400,7 @@ import Carbon
     }
     func windowShouldClose(_ sender:NSWindow)->Bool {
         guard sender === window else{return true}
-        if shortcutMonitor != nil{endShortcut()};sender.orderOut(nil);visibility.hide();return false
+        if shortcutMonitor != nil{endShortcut()};authorLinks.dismiss();sender.orderOut(nil);visibility.hide();return false
     }
     func windowWillClose(_ notification:Notification){if shortcutMonitor != nil {endShortcut()}}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}

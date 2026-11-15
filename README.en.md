@@ -18,7 +18,7 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 The app supports Simplified Chinese and English in one build. It follows the system language. To choose English just for LightCapture, open **System Settings → General → Language & Region → Applications**, add LightCapture, choose **English**, then quit and reopen the app. Changing the interface language does not move existing files.
 
-The **Support the Author** section links to Jerryb0t on [GitHub](https://github.com/Jerryb0t) and [X](https://x.com/Jerryb0t). Optional WeChat Pay, Alipay, and OKX Pay QR codes appear only after an explicit selection, one at a time. Support is voluntary: verify the recipient in your own payment app before paying. LightCapture never initiates or processes payments, confirms receipt, or contacts payment services.
+Two separate footer entries keep things simple: **👋 Follow the Author** contains only the [GitHub](https://github.com/Jerryb0t) and [X](https://x.com/Jerryb0t) profile links; **☕ Support the Author** contains only optional support methods. Popovers and images are created on demand and released after dismissal, with no additional persistent timers or network requests. No unmeasured memory savings are claimed. Optional WeChat Pay, Alipay, and OKX Pay QR codes appear only after an explicit selection, one at a time. Support is voluntary: verify the recipient in your own payment app before paying. LightCapture never initiates or processes payments, confirms receipt, or contacts payment services.
 
 ## Build from source
 

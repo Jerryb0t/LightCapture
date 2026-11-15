@@ -15,28 +15,38 @@ private func precondition(_ condition:@autoclosure ()->Bool,_ message:@autoclosu
   for language in ["en","zh-Hans"] {
    let url=root.appendingPathComponent(language+".lproj/Localizable.strings")
    let dict=NSDictionary(contentsOf:url) as! [String:String]
-   precondition(dict.count==151)
+   precondition(dict.count==155)
    for (key,value) in dict {precondition(key.components(separatedBy:"%@").count==value.components(separatedBy:"%@").count)}
   }
   let app=AppDelegate();app.buildUI();app.window.contentView!.layoutSubtreeIfNeeded()
-  precondition(app.authorLinks.button.title==expected)
+  precondition(app.authorLinks.button.title=="☕ "+expected)
   let content=app.window.contentView!,stack=content.subviews.compactMap{$0 as? NSStackView}.first!
   precondition(stack.frame.width<=content.bounds.width && stack.frame.minY>=0,"settings overflow")
   for b in app.buttons {precondition(b.intrinsicContentSize.width<=b.frame.width+2,"button text too wide: "+b.title)}
   let footer=app.authorLinks.button.convert(app.authorLinks.button.bounds,to:content)
   precondition(content.bounds.contains(footer))
   app.authorLinks.resourceRoot=URL(fileURLWithPath:FileManager.default.currentDirectoryPath).appendingPathComponent("Artwork")
+  app.authorLinks.prepare(.support)
   for index in 1...3 {
-   app.authorLinks.paymentPicker.selectItem(at:index);app.authorLinks.selectPayment()
-   let panel=app.authorLinks.popover.contentViewController!.view
+   app.authorLinks.paymentPicker!.selectItem(at:index);app.authorLinks.selectPayment()
+   let panel=app.authorLinks.popover!.contentViewController!.view
    for view in panel.subviews where !view.isHidden {
     precondition(panel.bounds.contains(view.frame),"support content outside panel")
     if let label=view as? NSTextField {precondition((label.cell?.cellSize(forBounds:label.bounds).height ?? 0)<=label.bounds.height+2,"support text clipped")}
    }
-   precondition(app.authorLinks.qrView.frame.maxY<app.authorLinks.paymentPicker.frame.minY)
+   precondition(app.authorLinks.qrView!.frame.maxY<app.authorLinks.paymentPicker!.frame.minY)
   }
-  precondition(!app.window.isVisible && !app.authorLinks.popover.isShown)
+  app.authorLinks.dismiss()
+  app.authorLinks.prepare(.follow)
+  precondition(app.authorLinks.paymentPicker == nil && app.authorLinks.qrView == nil)
+  app.authorLinks.dismiss()
+  for state:AppDelegate.RecordingControlState in [.starting,.recording,.stopping,.idle] {
+   app.updateRecordingControls(state);app.window.contentView!.layoutSubtreeIfNeeded()
+   let footer=app.authorLinks.button.convert(app.authorLinks.button.bounds,to:content)
+   precondition(content.bounds.contains(footer),"busy state pushes footer out of window")
+  }
+  precondition(!app.window.isVisible && app.authorLinks.popover?.isShown != true)
   precondition(L("已保存：%@","sample.png").contains("sample.png"))
-  print("PASS "+expected+": 151 resource keys/format counts, injected resource-bundle lookup, injected filename, settings/actions/footer fit, no visible UI")
+  print("PASS "+expected+": 155 resource keys/format counts, injected resource-bundle lookup, injected filename, settings/actions/footer fit, no visible UI")
  }
 }

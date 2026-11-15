@@ -13,6 +13,7 @@
 "停止并保存录屏" = "Stop & Save Recording";
 "全屏录屏" = "Full-Screen Recording";
 "全屏截图" = "Full-Screen Screenshot";
+"关注作者" = "Follow the Author";
 "关闭" = "Close";
 "关闭窗口后隐藏后台；双击应用图标重新打开。" = "Closing hides the app. Double-click its icon to reopen.";
 "准备录屏…" = "Preparing recording…";
@@ -61,6 +62,7 @@
 "待保存文件" = "Recover Files";
 "快捷键存在冲突，请修改快捷键；仍可点击按钮使用。" = "Shortcut conflict. Choose another shortcut, or use the buttons.";
 "截图" = "Screenshot";
+"截图与录屏" = "Capture & Record";
 "截图仅复制到剪贴板，不保存文件" = "Copy screenshots only; do not save files";
 "截图和录屏需要 macOS 允许轻截读取屏幕。只在你主动开始时捕获，不在后台持续抓屏。请在系统设置中自行开启，返回后再试。" = "LightCapture needs macOS screen-recording permission to capture screenshots and recordings. Capture only runs when you start it, never continuously in the background. Enable permission in System Settings, then try again.";
 "截图宽度不一致，或图片太小。请保持同一选区和缩放比例。" = "Image widths differ, or an image is too small. Keep the same selection and zoom level.";
@@ -132,6 +134,8 @@
 "请按组合键…" = "Press a shortcut…";
 "请求权限" = "Request Permission";
 "读取窗口失败，可重试" = "Could not read windows. Please retry.";
+"谢谢你的支持。选择一种方式查看收款码。" = "Thank you for your support. Choose a method to view its QR code.";
+"轻巧，只在需要时工作。闲置时不捕获屏幕。" = "Lightweight, ready when needed. No screen capture while idle.";
 "轻截" = "LightCapture";
 "轻截 · 正在录屏" = "LightCapture · Recording";
 "输入要放在截图上的文字。" = "Enter the text to place on the screenshot.";
