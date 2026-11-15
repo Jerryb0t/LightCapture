@@ -1,2 +1,3 @@
 "CFBundleDisplayName" = "LightCapture";
 "NSScreenCaptureUsageDescription" = "Read only your selected screen content when you explicitly take a screenshot or recording.";
+"NSMicrophoneUsageDescription" = "Use the microphone only when you enable it and start a screen recording.";

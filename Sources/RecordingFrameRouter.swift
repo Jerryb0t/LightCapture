@@ -24,10 +24,10 @@ struct RecordingFrameRouter<Frame> {
         guard let pendingFrame,let pendingTime else{return .ignored}
         return offer(pendingFrame,at:pendingTime,isNewFrame:true,ready:ready,append:append)
     }
-    /// At most one explicit terminal frame, never a timer that repeats frames at 30 fps.
-    mutating func appendTail(endingAt end:CMTime,ready:Bool,append:(Frame,CMTime,Bool)->Bool)->Outcome {
+    /// At most one explicit terminal frame, never a timer that repeats static frames.
+    mutating func appendTail(endingAt end:CMTime,ready:Bool,frameDuration:CMTime = CMTime(value:1,timescale:30),append:(Frame,CMTime,Bool)->Bool)->Outcome {
         guard let frame=lastFrame,let lastTime,end.isNumeric else{return .ignored}
-        let tail=CMTimeSubtract(end,CMTime(value:1,timescale:30))
+        let tail=CMTimeSubtract(end,frameDuration)
         guard CMTimeCompare(tail,lastTime)>0 else{return .ignored}
         guard ready else{return .backpressure}
         guard append(frame,tail,false) else{return .failed}

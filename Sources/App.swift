@@ -1,6 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 import Carbon
+import AVFoundation
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     var window: NSWindow!
@@ -13,8 +14,22 @@ import Carbon
     let status = NSTextField(wrappingLabelWithString: L("只做截图和录屏。闲置时不捕获屏幕。"))
     let pathLabel = NSTextField(wrappingLabelWithString: "")
     let detail = NSTextField(wrappingLabelWithString: L("文件保存到所选目录后，由 iCloud 自行同步。录制中间文件保留在本机。"))
-    let audio = NSButton(checkboxWithTitle: L("录制系统声音（不使用麦克风）"), target:nil, action:nil)
+    let audio = NSButton(checkboxWithTitle: L("录制系统声音"), target:nil, action:nil)
+    let microphone = NSButton(checkboxWithTitle: L("录制麦克风"), target:nil, action:nil)
     let quality = NSPopUpButton()
+    let frameRatePicker = NSPopUpButton()
+    let automaticUpdateCheckbox=NSButton(checkboxWithTitle:L("启动时自动检查更新"),target:nil,action:nil)
+    var updatePreferences=UserDefaults.standard
+    private var updateTask:Task<Void,Never>?
+    private var automaticCheckInFlight=false
+    let updateCheckButton=NSButton(title:L("检查更新…"),target:nil,action:nil)
+    let updateReleaseButton=NSButton(title:L("查看发布"),target:nil,action:nil)
+    let updateStatus=NSTextField(wrappingLabelWithString:"")
+    private var updateCheckInProgress=false
+    private var updateCandidate:ManualUpdateCandidate?
+    var checkForUpdate:(String) async throws -> ManualUpdateCandidate? = {try await ManualUpdateService().check(currentVersion:$0)}
+    var openReleasePage:(URL)->Bool = {NSWorkspace.shared.open($0)}
+    var installedVersion:String {Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.1.0"}
     let copyOnly = NSButton(checkboxWithTitle:L("截图仅复制到剪贴板，不保存文件"),target:nil,action:nil)
     var loginItem:LoginItemManaging = SystemLoginItem()
     let loginCheckbox=NSButton(checkboxWithTitle:L("登录 Mac 后自动运行"),target:nil,action:nil)
@@ -27,6 +42,7 @@ import Carbon
     var longLabel: NSTextField?
     var lastSaved: URL?
     var recordingRoot: URL?
+    var recordingFrameRate: RecordingFrameRate { RecordingFrameRate(rawValue:frameRatePicker.selectedTag()) ?? .fps30 }
     private var recordingTarget:CaptureTarget?
     enum RecordingControlState {case idle, starting, recording, stopping}
     private(set) var recordingControlState:RecordingControlState = .idle
@@ -51,6 +67,7 @@ import Carbon
         visibility.start(login:login)
         buildUI(); buildMenu(); registerHotkeys()
         if !login{showWindow()}
+        checkAutomaticallyIfDue()
         NotificationCenter.default.addObserver(self,selector:#selector(recordingScreensChanged),name:NSApplication.didChangeScreenParametersNotification,object:nil)
     }
     func buildUI() {
@@ -84,11 +101,21 @@ import Carbon
         root.addArrangedSubview(pathRow)
         pathLabel.stringValue=storage.root.path;pathLabel.font = .systemFont(ofSize:11);pathLabel.textColor = .secondaryLabelColor
         root.addArrangedSubview(pathLabel);pathLabel.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
-        quality.addItems(withTitles:[L("标准 · 30 fps / 最长边 1920"), L("高清 · 30 fps / 最长边 3840")])
+        quality.addItems(withTitles:[L("标准 · 最长边 1920"), L("高清 · 最长边 3840")])
         quality.selectItem(at:UserDefaults.standard.integer(forKey:"quality"));quality.target=self;quality.action=#selector(settingsChanged)
         copyOnly.state=UserDefaults.standard.bool(forKey:"copyOnly") ? .on : .off;copyOnly.target=self;copyOnly.action=#selector(settingsChanged)
-        let settings=NSStackView(views:[quality,audio,copyOnly]);settings.orientation = .vertical;settings.alignment = .leading;settings.spacing=7
-        audio.state=UserDefaults.standard.bool(forKey:"audio") ? .on : .off;audio.target=self;audio.action=#selector(settingsChanged)
+        for rate in RecordingFrameRate.allCases {
+            frameRatePicker.addItem(withTitle:"\(rate.rawValue) fps");frameRatePicker.lastItem?.tag=rate.rawValue
+        }
+        frameRatePicker.selectItem(withTag:RecordingFrameRate.load().rawValue)
+        frameRatePicker.setAccessibilityLabel(L("录屏帧率"));frameRatePicker.target=self;frameRatePicker.action=#selector(settingsChanged)
+        let videoSettings=NSStackView(views:[quality,NSTextField(labelWithString:L("录屏帧率")),frameRatePicker]);videoSettings.spacing=10
+        let audioSettings=NSStackView(views:[audio,microphone]);audioSettings.spacing=14
+        let settings=NSStackView(views:[videoSettings,audioSettings,copyOnly]);settings.orientation = .vertical;settings.alignment = .leading;settings.spacing=7
+        let preferences=UserDefaults.standard
+        audio.state=(preferences.object(forKey:"audio") == nil || preferences.bool(forKey:"audio")) ? .on : .off;audio.target=self;audio.action=#selector(settingsChanged)
+        microphone.state=preferences.bool(forKey:"recordingMicrophone") ? .on : .off
+        microphone.target=self;microphone.action=#selector(settingsChanged)
         loginCheckbox.target=self;loginCheckbox.action=#selector(toggleLoginItem)
         loginHint.font = .systemFont(ofSize:11);loginHint.textColor = .secondaryLabelColor
         settings.addArrangedSubview(loginCheckbox);settings.addArrangedSubview(loginHint);loginHint.widthAnchor.constraint(lessThanOrEqualToConstant:460).isActive=true
@@ -99,11 +126,64 @@ import Carbon
         detail.font = .systemFont(ofSize:10);detail.textColor = .secondaryLabelColor;root.addArrangedSubview(detail);detail.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
         let footer=NSStackView(views:[authorLinks.followButton,authorLinks.button]);footer.spacing=20
         root.addArrangedSubview(footer)
+        updateCheckButton.target=self;updateCheckButton.action=#selector(checkUpdates);updateCheckButton.bezelStyle = .inline
+        updateReleaseButton.target=self;updateReleaseButton.action=#selector(viewUpdateRelease);updateReleaseButton.bezelStyle = .inline;updateReleaseButton.isHidden=true
+        let version=NSTextField(labelWithString:L("版本 %@",installedVersion));version.font = .systemFont(ofSize:11);version.textColor = .secondaryLabelColor
+        automaticUpdateCheckbox.state=updatePreferences.bool(forKey:"automaticUpdateCheck") ? .on : .off
+        automaticUpdateCheckbox.target=self;automaticUpdateCheckbox.action=#selector(toggleAutomaticUpdate)
+        automaticUpdateCheckbox.font = .systemFont(ofSize:11)
+        let updateRow=NSStackView(views:[version,updateCheckButton,updateReleaseButton,automaticUpdateCheckbox]);updateRow.spacing=8;root.addArrangedSubview(updateRow)
+        updateStatus.font = .systemFont(ofSize:11);updateStatus.textColor = .secondaryLabelColor
+        root.addArrangedSubview(updateStatus);updateStatus.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true;updateStatus.isHidden=true
         selector.failure = {[weak self] error in self?.setBusy(false);self?.report(error)}
         recorder.started = { [weak self] in Task { @MainActor in self?.didStartRecording() } }
     }
     func actionButton(_ title:String,symbol:String,action:Selector)->NSButton {
         let b=NSButton(title:title,target:self,action:action);b.bezelStyle = .rounded;b.image=NSImage(systemSymbolName:symbol,accessibilityDescription:title);b.imagePosition = .imageLeading;b.font = .systemFont(ofSize:14,weight:.medium);buttons.append(b);return b
+    }
+    @objc func checkUpdates(){startUpdateCheck(automatic:false)}
+    @objc func toggleAutomaticUpdate(){
+        let enabled=automaticUpdateCheckbox.state == .on
+        updatePreferences.set(enabled,forKey:"automaticUpdateCheck")
+        if !enabled,automaticCheckInFlight {updateTask?.cancel()}
+    }
+    func checkAutomaticallyIfDue(now:Date = Date()){
+        guard updatePreferences.bool(forKey:"automaticUpdateCheck"),!busy,!updateCheckInProgress else{return}
+        let last=updatePreferences.object(forKey:"lastAutomaticUpdateCheck") as? Date
+        if let last,last<=now,now.timeIntervalSince(last)<86_400{return}
+        updatePreferences.set(now,forKey:"lastAutomaticUpdateCheck")
+        startUpdateCheck(automatic:true)
+    }
+    private func startUpdateCheck(automatic:Bool){
+        guard !busy,!updateCheckInProgress else{return}
+        updateCheckInProgress=true;automaticCheckInFlight=automatic;updateCandidate=nil;updateReleaseButton.isHidden=true;refreshUpdateControls()
+        if automatic {updateStatus.isHidden=true}else{updateStatus.stringValue=L("正在检查 GitHub 发布版本…");updateStatus.isHidden=false}
+        updateTask=Task { @MainActor [weak self] in
+            guard let self else{return}
+            defer {self.updateTask=nil;self.automaticCheckInFlight=false;self.updateCheckInProgress=false;self.refreshUpdateControls()}
+            do {
+                let candidate=try await self.checkForUpdate(self.installedVersion)
+                guard !Task.isCancelled else{return}
+                self.updateCandidate=candidate
+                if let candidate{
+                    self.updateStatus.stringValue=L("发现 %@。自动安装尚未启用，可查看官方发布。",candidate.tag)
+                    self.updateStatus.isHidden=false;self.updateReleaseButton.isHidden=false
+                }else if !automatic {self.updateStatus.stringValue=L("你已使用最新发布版本。")}
+            }catch ManualUpdateError.noPublishedRelease {
+                if !automatic && !Task.isCancelled {self.updateStatus.stringValue=L("GitHub 暂未发布可安装版本。")}
+            }catch {
+                if !automatic && !Task.isCancelled {self.updateStatus.stringValue=L("检查更新失败，请稍后重试。")}
+            }
+        }
+    }
+    @objc func viewUpdateRelease(){
+        guard !busy,let page=updateCandidate?.releaseURL else{return}
+        if !openReleasePage(page){updateStatus.stringValue=L("未能打开浏览器，请稍后重试。")}
+    }
+    private func refreshUpdateControls(){
+        automaticUpdateCheckbox.isEnabled = !busy
+        updateCheckButton.isEnabled = !busy && !updateCheckInProgress
+        updateReleaseButton.isEnabled = !busy && !updateCheckInProgress
     }
     func buildMenu() {
         let menu=NSMenu();let app=NSMenuItem();menu.addItem(app)
@@ -169,7 +249,7 @@ import Carbon
     }
     func endShortcut(){if let monitor=shortcutMonitor{NSEvent.removeMonitor(monitor)};shortcutMonitor=nil;shortcutButton.title=L("修改…");registerHotkeys()}
 
-    @objc func settingsChanged(){UserDefaults.standard.set(quality.indexOfSelectedItem,forKey:"quality");UserDefaults.standard.set(audio.state == .on,forKey:"audio");UserDefaults.standard.set(copyOnly.state == .on,forKey:"copyOnly")}
+    @objc func settingsChanged(){UserDefaults.standard.set(quality.indexOfSelectedItem,forKey:"quality");UserDefaults.standard.set(audio.state == .on,forKey:"audio");UserDefaults.standard.set(microphone.state == .on,forKey:"recordingMicrophone");recordingFrameRate.save();UserDefaults.standard.set(copyOnly.state == .on,forKey:"copyOnly")}
     @objc func revealSettings(){visibility.reopen();showWindow()}
     @objc func showWindow(){window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
     @objc func chooseFolder(){
@@ -181,7 +261,7 @@ import Carbon
     }
     @objc func openFolder(){do{try FileManager.default.createDirectory(at:storage.root,withIntermediateDirectories:true);NSWorkspace.shared.open(storage.root)}catch{report(error)}}
     @objc func openRecovery(){do{try FileManager.default.createDirectory(at:CaptureStorage.recoveryDirectory,withIntermediateDirectories:true);NSWorkspace.shared.open(CaptureStorage.recoveryDirectory)}catch{report(error)}}
-    func setBusy(_ value:Bool){busy=value;for b in buttons{b.isEnabled = !value};quality.isEnabled = !value;audio.isEnabled = !value;copyOnly.isEnabled = !value;shortcutButton.isEnabled = !value;if !value{visibility.finished()}}
+    func setBusy(_ value:Bool){busy=value;for b in buttons{b.isEnabled = !value};quality.isEnabled = !value;frameRatePicker.isEnabled = !value;audio.isEnabled = !value;microphone.isEnabled = !value;copyOnly.isEnabled = !value;shortcutButton.isEnabled = !value;refreshUpdateControls();if !value{visibility.finished()}}
     func report(_ error:Error){status.stringValue=error.localizedDescription;showWindow()}
     func permission()->Bool{
         if CGPreflightScreenCaptureAccess(){return true}
@@ -344,10 +424,20 @@ import Carbon
     func beginRecording(_ target:CaptureTarget){
         recordingRoot=storage.root;recordingTarget=target;stopPending=false;updateRecordingControls(.starting)
         status.stringValue=L("准备录屏…")
+        let includeMic=microphone.state == .on,includeSystemAudio=audio.state == .on,highQuality=quality.indexOfSelectedItem==1,frameRate=recordingFrameRate
         Task { @MainActor [self] in
             do{
+                if includeMic {
+                    let allowed:Bool
+                    switch AVCaptureDevice.authorizationStatus(for:.audio) {
+                    case .authorized: allowed=true
+                    case .notDetermined: allowed=await AVCaptureDevice.requestAccess(for:.audio)
+                    default: allowed=false
+                    }
+                    guard allowed else {throw CaptureFailure.message(L("麦克风权限未开启。请在系统设置允许轻截使用麦克风，或关闭麦克风录制后重试。"))}
+                }
                 try await Task.sleep(nanoseconds:300_000_000)
-                try await recorder.start(target:target,systemAudio:audio.state == .on,highQuality:quality.indexOfSelectedItem==1){[weak self] result in Task { @MainActor in self?.recordingFinished(result) }}
+                try await recorder.start(target:target,systemAudio:includeSystemAudio,microphone:includeMic,highQuality:highQuality,frameRate:frameRate){[weak self] result in Task { @MainActor in self?.recordingFinished(result) }}
             }catch{resetRecording();setBusy(false);report(error)}
         }
     }
@@ -399,7 +489,7 @@ import Carbon
     }
     @objc func quit(){NSApp.terminate(nil)}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
-        if busy {let a=NSAlert();a.messageText=L("请先结束当前任务");a.informativeText=L("录屏请先停止并保存；长截图请保存或取消，避免丢失。");a.runModal();return .terminateCancel};return .terminateNow
+        if busy {let a=NSAlert();a.messageText=L("请先结束当前任务");a.informativeText=L("录屏请先停止并保存；长截图请保存或取消，避免丢失。");a.runModal();return .terminateCancel};updateTask?.cancel();return .terminateNow
     }
     func windowShouldClose(_ sender:NSWindow)->Bool {
         guard sender === window else{return true}
@@ -407,5 +497,5 @@ import Carbon
     }
     func windowWillClose(_ notification:Notification){if shortcutMonitor != nil {endShortcut()}}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{revealSettings();return true}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{revealSettings();checkAutomaticallyIfDue();return true}
 }

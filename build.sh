@@ -1,6 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h}"
+requested_identity="${SIGN_IDENTITY:-}"
+if [[ -f .local-signing.env ]]; then source .local-signing.env; fi
+if [[ -n "$requested_identity" ]]; then SIGN_IDENTITY="$requested_identity"; fi
 APP="${APP_OUTPUT:-$PWD/build/轻截.app}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$PWD/Artwork/LightCaptureIcon.icns" "$APP/Contents/Resources/LightCaptureIcon.icns"
@@ -22,10 +25,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>LightCaptureIcon.icns</string>
 <key>CFBundleExecutable</key><string>LightCapture</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>仅在你开启麦克风选项并开始录屏时录制麦克风声音。</string>
 <key>NSScreenCaptureUsageDescription</key><string>仅在你主动截图或录屏时读取所选屏幕内容。</string>
 </dict></plist>
 PLIST

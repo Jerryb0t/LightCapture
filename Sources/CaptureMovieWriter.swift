@@ -10,7 +10,9 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
     private let video:AVAssetWriterInput
     private let adaptor:AVAssetWriterInputPixelBufferAdaptor
     private let audio:AVAssetWriterInput?
+    private let microphone:AVAssetWriterInput?
     private let url:URL
+    private let frameRate:RecordingFrameRate
     private var frames=RecordingFrameRouter<CVPixelBuffer>()
     private var accepting=true
     private var finishing=false
@@ -20,24 +22,38 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
     private var finishTicket:UUID?
     private var error:Error?
     private var lastAudioTime:CMTime?
+    private var lastMicrophoneTime:CMTime?
+    private struct AudioPacket {let input:AVAssetWriterInput;let sample:CMSampleBuffer;let bytes:Int}
+    private var pendingAudio:[AudioPacket]=[]
+    private var pendingAudioBytes=0
+    private var audioPendingSince:Double?
+    private var audioDrainScheduled=false
     private var firstFrameUptime:Double?
     private var startCallback:(()->Void)?
     private var failureCallback:((Error)->Void)?
 
-    init(url:URL,width:Int,height:Int,systemAudio:Bool,started:@escaping()->Void,failed:@escaping(Error)->Void) throws {
-        self.url=url;writer=try AVAssetWriter(outputURL:url,fileType:.mp4)
-        video=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height,AVVideoCompressionPropertiesKey:[AVVideoExpectedSourceFrameRateKey:30,AVVideoAllowFrameReorderingKey:false]])
+    init(url:URL,width:Int,height:Int,systemAudio:Bool,microphone:Bool = false,frameRate:RecordingFrameRate = .fps30,started:@escaping()->Void,failed:@escaping(Error)->Void) throws {
+        self.url=url;self.frameRate=frameRate;writer=try AVAssetWriter(outputURL:url,fileType:.mp4)
+        video=AVAssetWriterInput(mediaType:.video,outputSettings:Self.videoSettings(width:width,height:height,frameRate:frameRate))
         video.expectsMediaDataInRealTime=true
         adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:video,sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,kCVPixelBufferWidthKey as String:width,kCVPixelBufferHeightKey as String:height])
         if systemAudio {
             let input=AVAssetWriterInput(mediaType:.audio,outputSettings:[AVFormatIDKey:kAudioFormatMPEG4AAC,AVSampleRateKey:48000,AVNumberOfChannelsKey:2,AVEncoderBitRateKey:128000])
             input.expectsMediaDataInRealTime=true;audio=input
         }else{audio=nil}
+        if microphone {
+            let input=AVAssetWriterInput(mediaType:.audio,outputSettings:[AVFormatIDKey:kAudioFormatMPEG4AAC,AVSampleRateKey:48000,AVNumberOfChannelsKey:2,AVEncoderBitRateKey:128000])
+            input.expectsMediaDataInRealTime=true;self.microphone=input
+        }else{self.microphone=nil}
         super.init()
         guard writer.canAdd(video) else{throw CaptureFailure.message(L("此设备暂不支持所选录屏编码。"))};writer.add(video)
         if let audio{guard writer.canAdd(audio) else{throw CaptureFailure.message(L("此设备暂不支持录制系统音频。"))};writer.add(audio)}
+        if let microphone=self.microphone{guard writer.canAdd(microphone) else{throw CaptureFailure.message(L("此设备暂不支持录制麦克风。"))};writer.add(microphone)}
         guard writer.startWriting() else{throw writer.error ?? CaptureFailure.message(L("无法启动录屏编码器。")) }
         startCallback=started;failureCallback=failed
+    }
+    static func videoSettings(width:Int,height:Int,frameRate:RecordingFrameRate)->[String:Any] {
+        [AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height,AVVideoCompressionPropertiesKey:[AVVideoExpectedSourceFrameRateKey:frameRate.rawValue,AVVideoAllowFrameReorderingKey:false]]
     }
     func stream(_ stream:SCStream,didOutputSampleBuffer sampleBuffer:CMSampleBuffer,of type:SCStreamOutputType){
         consume(sampleBuffer,of:type)
@@ -58,13 +74,19 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
             if case .failed=result{fail(writer.error ?? CaptureFailure.message(L("录屏视频帧写入失败。")));return}
             if frames.pendingFrame != nil {schedulePendingDrain()}else{pendingSince=nil}
             notifyFirstFrame()
-        }else if type == .audio,let audio,let first=frames.firstTime,time.isNumeric,CMTimeCompare(time,first)>=0 {
-            if let lastAudioTime,CMTimeCompare(time,lastAudioTime)<=0{return}
-            guard audio.isReadyForMoreMediaData else{return}
-            guard audio.append(sampleBuffer) else{fail(writer.error ?? CaptureFailure.message(L("录屏音频写入失败。")));return}
-            lastAudioTime=time
+        }else if (type == .audio || type == .microphone),let first=frames.firstTime,time.isNumeric,CMTimeCompare(time,first)>=0 {
+            let input=type == .audio ? audio : microphone
+            let last=type == .audio ? lastAudioTime : lastMicrophoneTime
+            guard let input else{return}
+            if let last,CMTimeCompare(time,last)<=0{return}
+            let bytes=CMSampleBufferGetTotalSampleSize(sampleBuffer)
+            guard pendingAudio.count<128,pendingAudioBytes+bytes<=1_048_576 else{fail(CaptureFailure.message(L("音频编码器持续繁忙，录屏已停止；原文件保留。")));return}
+            pendingAudio.append(AudioPacket(input:input,sample:sampleBuffer,bytes:bytes));pendingAudioBytes += bytes
+            if type == .audio {lastAudioTime=time}else{lastMicrophoneTime=time}
+            drainAudio();if !pendingAudio.isEmpty{scheduleAudioDrain()}
         }
     }
+
     private func appendVideo(_ pixel:CVPixelBuffer,_ pts:CMTime,_ first:Bool)->Bool {
         if first {writer.startSession(atSourceTime:pts)}
         return adaptor.append(pixel,withPresentationTime:pts)
@@ -87,7 +109,34 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
             schedulePendingDrain()
         }
     }
-    private func finishAudio(){if !audioFinished {audio?.markAsFinished();audioFinished=true}}
+    private func drainAudio(){
+        while let packet=pendingAudio.first,packet.input.isReadyForMoreMediaData,error == nil {
+            guard packet.input.append(packet.sample) else{fail(writer.error ?? CaptureFailure.message(L("录屏音频写入失败。")));return}
+            pendingAudio.removeFirst();pendingAudioBytes -= packet.bytes
+        }
+        if pendingAudio.isEmpty{audioPendingSince=nil}
+    }
+    private func scheduleAudioDrain(){
+        if audioPendingSince == nil{audioPendingSince=ProcessInfo.processInfo.systemUptime}
+        guard !audioDrainScheduled else{return};audioDrainScheduled=true
+        queue.asyncAfter(deadline:.now()+0.01){[self] in
+            audioDrainScheduled=false;guard accepting,!finishing else{return};drainAudio()
+            if !pendingAudio.isEmpty {
+                if ProcessInfo.processInfo.systemUptime-(audioPendingSince ?? 0)>2 {fail(CaptureFailure.message(L("音频编码器持续繁忙，录屏已停止；原文件保留。")));return}
+                scheduleAudioDrain()
+            }
+        }
+    }
+    private func finishAudio(){if !audioFinished {pendingAudio.removeAll();pendingAudioBytes=0;audioPendingSince=nil;audio?.markAsFinished();microphone?.markAsFinished();audioFinished=true}}
+    private func finishAudioPending(end:CMTime,deadline:Double,continuation:CheckedContinuation<URL,Error>){
+        drainAudio()
+        if let error{closePreservingOutput();frames.releaseFrame();continuation.resume(throwing:error);return}
+        if !pendingAudio.isEmpty {
+            if ProcessInfo.processInfo.systemUptime<deadline {queue.asyncAfter(deadline:.now()+0.01){[self] in finishAudioPending(end:end,deadline:deadline,continuation:continuation)};return}
+            closePreservingOutput();frames.releaseFrame();continuation.resume(throwing:CaptureFailure.message(L("音频编码器持续繁忙，录屏已停止；原文件保留。")));return
+        }
+        finishAudio();finishPending(end:end,deadline:ProcessInfo.processInfo.systemUptime+2,continuation:continuation)
+    }
     private func fail(_ failure:Error){
         guard error == nil else{return};error=failure;accepting=false
         let callback=failureCallback;failureCallback=nil;callback?(failure)
@@ -105,9 +154,8 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
                 }
                 // Use a monotonic elapsed interval aligned to first media PTS, not wall-clock dates.
                 let elapsed=max(0,ProcessInfo.processInfo.systemUptime-uptime)
-                let end=CMTimeMaximum(CMTimeAdd(first,CMTime(seconds:elapsed,preferredTimescale:60000)),CMTimeAdd(last,CMTime(value:1,timescale:30)))
-                finishAudio()
-                finishPending(end:end,deadline:ProcessInfo.processInfo.systemUptime+2,continuation:continuation)
+                let end=CMTimeMaximum(CMTimeAdd(first,CMTime(seconds:elapsed,preferredTimescale:60000)),CMTimeAdd(last,frameRate.interval))
+                finishAudioPending(end:end,deadline:ProcessInfo.processInfo.systemUptime+2,continuation:continuation)
             }
         }
     }
@@ -120,7 +168,7 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
                 closePreservingOutput();frames.releaseFrame();continuation.resume(throwing:CaptureFailure.message(L("最新视频帧持续无法写入，录屏未完整完成。")));return
             }
         }
-        let finalEnd=CMTimeMaximum(end,CMTimeAdd(frames.lastTime!,CMTime(value:1,timescale:30)))
+        let finalEnd=CMTimeMaximum(end,CMTimeAdd(frames.lastTime!,frameRate.interval))
         finishTail(end:finalEnd,deadline:deadline,continuation:continuation)
     }
     private func finishTail(end:CMTime,deadline:Double,continuation:CheckedContinuation<URL,Error>){
@@ -129,7 +177,7 @@ final class CaptureMovieWriter:NSObject,SCStreamOutput, @unchecked Sendable {
             queue.asyncAfter(deadline:.now()+0.01){[self] in finishTail(end:end,deadline:deadline,continuation:continuation)};return
         }
         var route=frames
-        let outcome=route.appendTail(endingAt:end,ready:video.isReadyForMoreMediaData){[self] pixel,time,_ in adaptor.append(pixel,withPresentationTime:time)}
+        let outcome=route.appendTail(endingAt:end,ready:video.isReadyForMoreMediaData,frameDuration:frameRate.interval){[self] pixel,time,_ in adaptor.append(pixel,withPresentationTime:time)}
         route.releaseFrame();frames=route
         if case .failed=outcome {closePreservingOutput();continuation.resume(throwing:writer.error ?? CaptureFailure.message(L("录屏尾帧写入失败。")));return}
         // If only the optional tail cannot be appended, finalize accepted frames; never delete a recording for this.

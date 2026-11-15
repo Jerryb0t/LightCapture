@@ -4,7 +4,7 @@ cd "${0:A:h}"
 mkdir -p build/tests
 sources=(Sources/*.swift)
 sources=(${sources:#Sources/main.swift})
-for name in Stitcher Editor ResourceLifecycle SelectionInteraction ScreenshotDelivery SessionSampler LongFrameProcessor DeadlineRequest RecordingFrameRouter RecordingControlPlacement RecordingControls LoginBackground AppVisibility AuthorLinks FrozenCapture CaptureDiagnostics; do
+for name in Stitcher Editor ResourceLifecycle SelectionInteraction ScreenshotDelivery SessionSampler LongFrameProcessor DeadlineRequest RecordingFrameRouter RecordingControlPlacement RecordingControls LoginBackground AppVisibility AuthorLinks FrozenCapture RecordingFrameRate ManualUpdate UpdateControls CaptureDiagnostics; do
   xcrun swiftc -module-cache-path build/ModuleCache -swift-version 5 -O $sources "Tests/${name}Tests.swift" -o "build/tests/$name" -framework AppKit -framework ScreenCaptureKit -framework AVFoundation -framework Carbon
   "build/tests/$name"
 done
@@ -25,4 +25,10 @@ build/tests/Localization "$resource_bundle" zh-Hans
 if [[ "${1:-}" == "--qr" ]]; then
   xcrun swiftc -module-cache-path build/ModuleCache -swift-version 5 -O $sources Tests/SupportQRTests.swift -o build/tests/SupportQR -framework AppKit -framework ScreenCaptureKit -framework AVFoundation -framework Carbon
   build/tests/SupportQR
+fi
+
+# Optional synthetic media/codec integration; never captures the screen or microphone.
+if [[ "${1:-}" == "--recording-av" ]]; then
+  xcrun swiftc -module-cache-path build/ModuleCache -swift-version 5 -O $sources Tests/RecordingAVIntegrationTests.swift -o build/tests/RecordingAVIntegration -framework AppKit -framework ScreenCaptureKit -framework AVFoundation -framework Carbon
+  build/tests/RecordingAVIntegration
 fi

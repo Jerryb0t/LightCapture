@@ -7,6 +7,7 @@ import AVFoundation
     private var movie: CaptureMovieWriter?
     private var sessionID=UUID()
     private var stopping=false
+    private var needsAudioMix=false
     private var firstFrameDeadline:Task<Void,Never>?
     private let recordingContentDeadline=DeadlineRequest<SCShareableContent>()
     private let recordingStopDeadline=DeadlineRequest<Void>()
@@ -18,7 +19,7 @@ import AVFoundation
     static func content() async throws -> SCShareableContent {
         try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     }
-    static func configuration(target: CaptureTarget, recording: Bool, systemAudio: Bool = false, highQuality: Bool = false) -> SCStreamConfiguration {
+    static func configuration(target: CaptureTarget, recording: Bool, systemAudio: Bool = false, microphone:Bool = false, highQuality: Bool = false, frameRate:RecordingFrameRate = .fps30) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         config.sourceRect = target.rect
         let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == target.display.displayID }
@@ -32,10 +33,10 @@ import AVFoundation
         config.showsCursor = recording
         config.capturesAudio = recording && systemAudio
         config.excludesCurrentProcessAudio = true
-        config.captureMicrophone = false
+        config.captureMicrophone = recording && microphone
         if recording {config.pixelFormat=kCVPixelFormatType_32BGRA;config.sampleRate=48000;config.channelCount=2}
         config.queueDepth = recording ? 5 : 3
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        frameRate.configure(config)
         return config
     }
     static func filter(target: CaptureTarget, content: SCShareableContent, recording:Bool = false) throws -> SCContentFilter {
@@ -59,16 +60,16 @@ import AVFoundation
         }
         return try await SCScreenshotManager.captureImage(contentFilter:filter,configuration:config)
     }
-    func start(target: CaptureTarget, systemAudio: Bool, highQuality: Bool, completion: @escaping (Result<URL,Error>) -> Void) async throws {
+    func start(target: CaptureTarget, systemAudio: Bool, microphone:Bool = false, highQuality: Bool, frameRate:RecordingFrameRate = .fps30, completion: @escaping (Result<URL,Error>) -> Void) async throws {
         guard stream == nil else {throw CaptureFailure.message(L("已有录屏任务。"))}
         let content:SCShareableContent=try await withCheckedThrowingContinuation{ continuation in
             recordingContentDeadline.start(seconds:8,operation:{try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:false)},completion:{continuation.resume(with:$0)})
         }
         guard content.displays.contains(where:{$0.displayID == target.display.displayID}) else{throw CaptureFailure.message(L("屏幕已断开。"))}
         let url=try CaptureStorage.temporaryURL(ext:"mp4")
-        let config=Self.configuration(target:target,recording:true,systemAudio:systemAudio,highQuality:highQuality)
-        let token=UUID();sessionID=token;stopping=false
-        let movie=try CaptureMovieWriter(url:url,width:config.width,height:config.height,systemAudio:systemAudio,started:{[weak self] in
+        let config=Self.configuration(target:target,recording:true,systemAudio:systemAudio,microphone:microphone,highQuality:highQuality,frameRate:frameRate)
+        let token=UUID();sessionID=token;stopping=false;needsAudioMix=systemAudio && microphone
+        let movie=try CaptureMovieWriter(url:url,width:config.width,height:config.height,systemAudio:systemAudio,microphone:microphone,frameRate:frameRate,started:{[weak self] in
             Task{@MainActor in guard let self,self.sessionID == token,self.stream != nil,!self.stopping else{return};self.firstFrameDeadline?.cancel();self.firstFrameDeadline=nil;self.started?()}
         },failed:{[weak self] error in
             Task{@MainActor in guard let self,self.sessionID == token else{return};await self.writerFailed(error)}
@@ -77,6 +78,7 @@ import AVFoundation
         do{
             try stream.addStreamOutput(movie,type:.screen,sampleHandlerQueue:movie.queue)
             if systemAudio {try stream.addStreamOutput(movie,type:.audio,sampleHandlerQueue:movie.queue)}
+            if microphone {try stream.addStreamOutput(movie,type:.microphone,sampleHandlerQueue:movie.queue)}
             self.stream=stream;self.movie=movie;tempURL=url;self.completion=completion
             firstFrameDeadline=Task{[weak self,weak stream,weak movie] in
                 do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{return}
@@ -98,7 +100,13 @@ import AVFoundation
             }
         }catch{if token == sessionID {movie.abort();finish(.failure(error))};return}
         guard token == sessionID else{return}
-        do{let url=try await movie.finish();guard token == sessionID else{return};finish(.success(url))}
+        do{
+            let original=try await movie.finish();guard token == sessionID else{return}
+            let url=needsAudioMix ? try await RecordingAudioMixdown.mix(original) : original
+            guard token == sessionID else{return}
+            if url != original {try? FileManager.default.removeItem(at:original)}
+            finish(.success(url))
+        }
         catch{guard token == sessionID else{return};finish(.failure(error))}
     }
     private func writerFailed(_ error:Error) async {
@@ -109,7 +117,7 @@ import AVFoundation
     }
     private func finish(_ result:Result<URL,Error>){
         guard let callback=completion else{return}
-        firstFrameDeadline?.cancel();firstFrameDeadline=nil;completion=nil;stream=nil;movie=nil;tempURL=nil;stopping=false;sessionID=UUID();callback(result)
+        firstFrameDeadline?.cancel();firstFrameDeadline=nil;completion=nil;stream=nil;movie=nil;tempURL=nil;stopping=false;needsAudioMix=false;sessionID=UUID();callback(result)
     }
     nonisolated func stream(_ stream:SCStream,didStopWithError error:Error){
         Task{@MainActor in guard self.stream === stream else{return};self.movie?.abort();self.finish(.failure(error))}
