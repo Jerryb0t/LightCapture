@@ -32,15 +32,11 @@ struct CaptureTarget {
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.setMode(mode);view.setScreenshotAllowed(allowsScreenshot);view.frozenImage=frozen?.image;view.notice=notice
             let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
-            view.candidates = windowOrder.compactMap { info in
-                guard let number=info[kCGWindowNumber as String] as? NSNumber,
-                      let bounds=info[kCGWindowBounds as String] as? [String:Any],let raw=CGRect(dictionaryRepresentation:bounds as CFDictionary) else{return nil}
-                let candidate=availableWindows.first{$0.windowID==number.uint32Value}
-                let global=CGRect(x:raw.minX,y:primaryHeight-raw.maxY,width:raw.width,height:raw.height)
-                guard WindowSnapPolicy.permits(layer:info[kCGWindowLayer as String] as? Int ?? -1,alpha:info[kCGWindowAlpha as String] as? Double ?? 1,frame:global,displayBounds:screen.frame,owner:info[kCGWindowOwnerName as String] as? String ?? "",isOwn:(info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value==ProcessInfo.processInfo.processIdentifier) else{return nil}
-                let local=global.offsetBy(dx:-screen.frame.minX,dy:-screen.frame.minY).intersection(view.bounds)
-                return local.isEmpty ? nil : (local,candidate)
-            }
+            view.candidates = WindowSnapCandidates.make(order:windowOrder,
+                fallback:WindowSnapCandidates.records(availableWindows),screen:screen.frame,
+                primaryHeight:primaryHeight,ownPID:ProcessInfo.processInfo.processIdentifier).map{rect,id in
+                    (rect,availableWindows.first{$0.windowID==id})
+                }
             view.finished = { [weak self, weak view] rect, selectedWindow, annotate in
                 guard let self else { return }
                 if let rect {
