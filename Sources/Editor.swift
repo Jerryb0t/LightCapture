@@ -148,7 +148,7 @@ enum CaptureEditorRenderer {
     private let canvas: CaptureEditorCanvas
     private var window: NSWindow!
     private var finished = false
-    private let message = NSTextField(labelWithString: "原图保持不变 · 标注后保存或复制")
+    private let message = NSTextField(labelWithString: L("原图保持不变 · 标注后保存或复制"))
     private var undoButton: NSButton!
     init(image: CGImage, onSave: @escaping(CGImage)->Void, onCancel: @escaping()->Void,
          onRecord: (() -> Void)? = nil, onLong: (() -> Void)? = nil, copyOnly: Bool = false,
@@ -158,30 +158,30 @@ enum CaptureEditorRenderer {
         canvas = CaptureEditorCanvas(image: image)
         super.init()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720), styleMask: [.titled,.closable,.resizable,.miniaturizable], backing: .buffered, defer: false)
-        window.title = "截图编辑"; window.minSize = NSSize(width: 720, height: 460)
+        window.title = L("截图编辑"); window.minSize = NSSize(width: 720, height: 460)
         window.isReleasedWhenClosed = false; window.delegate = self
         let root = NSView(); window.contentView = root
-        modes = NSSegmentedControl(labels: ["截图", "录屏", "长截图"], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
+        modes = NSSegmentedControl(labels: [L("截图"), L("录屏"), L("长截图")], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
         modes.selectedSegment = 0; modes.segmentStyle = .rounded
         modes.setEnabled(onRecord != nil, forSegment: 1); modes.setEnabled(onLong != nil, forSegment: 2)
         modes.controlSize = .large; modes.font = .systemFont(ofSize: 14, weight: .semibold)
         modes.wantsLayer = true; modes.layer?.cornerRadius = 7
-        let guide = NSTextField(labelWithString: copyOnly ? "按 Enter 复制截图" : "按 Enter 复制并保存截图")
+        let guide = NSTextField(labelWithString: copyOnly ? L("按 Enter 复制截图") : L("按 Enter 复制并保存截图"))
         guide.textColor = .secondaryLabelColor; guide.font = .systemFont(ofSize: 12)
         let modeBar = NSStackView(views: [modes, guide]); modeBar.spacing = 16
-        let tools = NSSegmentedControl(labels: ["画笔", "箭头", "矩形", "文字"], trackingMode: .selectOne, target: self, action: #selector(changeTool(_:)))
+        let tools = NSSegmentedControl(labels: [L("画笔"), L("箭头"), L("矩形"), L("文字")], trackingMode: .selectOne, target: self, action: #selector(changeTool(_:)))
         tools.selectedSegment = 0
-        let color = NSPopUpButton(); color.addItems(withTitles: ["红色","黄色","蓝色","黑色","白色"])
+        let color = NSPopUpButton(); color.addItems(withTitles: [L("红色"),L("黄色"),L("蓝色"),L("黑色"),L("白色")])
         color.target = self; color.action = #selector(changeColor(_:))
-        undoButton = button("撤销", #selector(undo)); undoButton.isEnabled = false
-        let copy = button("复制", #selector(copyImage)); copy.keyEquivalent = "c"
-        let save = button(copyOnly ? "仅复制" : "复制并保存", #selector(saveImage))
+        undoButton = button(L("撤销"), #selector(undo)); undoButton.isEnabled = false
+        let copy = button(L("复制"), #selector(copyImage)); copy.keyEquivalent = "c"
+        let save = button(copyOnly ? L("仅复制") : L("复制并保存"), #selector(saveImage))
         save.keyEquivalent = "\r"; save.keyEquivalentModifierMask = []
         window.defaultButtonCell = save.cell as? NSButtonCell
-        let cancel = button("取消", #selector(cancelEditing)); cancel.keyEquivalent = "\u{1b}"
+        let cancel = button(L("取消"), #selector(cancelEditing)); cancel.keyEquivalent = "\u{1b}"
         let bar = NSStackView(views: [tools,color,undoButton,copy,save,cancel]); bar.spacing = 10
         message.textColor = .secondaryLabelColor; message.font = .systemFont(ofSize: 12)
-        message.stringValue = copyOnly ? "按 Enter 完成 · 仅复制，不写入文件" : "按 Enter 完成 · 原图不变，复制并保存标注后的截图"
+        message.stringValue = copyOnly ? L("按 Enter 完成 · 仅复制，不写入文件") : L("按 Enter 完成 · 原图不变，复制并保存标注后的截图")
         for view in [modeBar,bar,canvas,message] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
         NSLayoutConstraint.activate([
             modeBar.leadingAnchor.constraint(equalTo: root.leadingAnchor,constant: 16),
@@ -229,8 +229,8 @@ enum CaptureEditorRenderer {
     }
     @objc private func undo() { canvas.undoLast() }
     private func insertText(at point: CGPoint) {
-        let alert = NSAlert(); alert.messageText = "添加文字"; alert.informativeText = "输入要放在截图上的文字。"
-        alert.addButton(withTitle: "添加"); alert.addButton(withTitle: "取消")
+        let alert = NSAlert(); alert.messageText = L("添加文字"); alert.informativeText = L("输入要放在截图上的文字。")
+        alert.addButton(withTitle: L("添加")); alert.addButton(withTitle: L("取消"))
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 26)); alert.accessoryView = input
         alert.window.initialFirstResponder = input
         alert.beginSheetModal(for: window) { [weak self] response in
@@ -244,16 +244,16 @@ enum CaptureEditorRenderer {
     }
     private func output() -> CGImage? {
         let result = CaptureEditorRenderer.render(image: image, annotations: canvas.annotations)
-        if result == nil { message.stringValue = "图片渲染失败，请尝试撤销或取消。" }
+        if result == nil { message.stringValue = L("图片渲染失败，请尝试撤销或取消。") }
         return result
     }
     private func copyToPasteboard(_ image: CGImage) -> Bool {
         guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-            message.stringValue = "无法生成 PNG，请重试"; return false
+            message.stringValue = L("无法生成 PNG，请重试"); return false
         }
         pasteboard.clearContents()
         let copied = pasteboard.setData(data, forType: .png)
-        message.stringValue = copied ? "已复制 PNG，可粘贴到聊天或文档中" : "复制失败，请重试"
+        message.stringValue = copied ? L("已复制 PNG，可粘贴到聊天或文档中") : L("复制失败，请重试")
         return copied
     }
     @objc private func copyImage() {

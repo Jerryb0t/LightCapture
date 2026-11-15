@@ -18,11 +18,11 @@ enum LoginLaunch {
     }
     static func presentation(_ status:SMAppService.Status)->(NSControl.StateValue,String) {
         switch status {
-        case .enabled:return (.on,"已开启，下次登录时后台运行。")
-        case .requiresApproval:return (.mixed,"等待系统批准，请在系统设置 → 通用 → 登录项中允许。")
-        case .notFound:return (.off,"系统未找到此应用的登录项，建议先固定安装位置。")
-        case .notRegistered:return (.off,"未开启；仅勾选后才会注册登录项。")
-        @unknown default:return (.off,"无法确认登录项状态。")
+        case .enabled:return (.on,L("已开启，下次登录时后台运行。"))
+        case .requiresApproval:return (.mixed,L("等待系统批准，请在系统设置 → 通用 → 登录项中允许。"))
+        case .notFound:return (.off,L("系统未找到此应用的登录项，建议先固定安装位置。"))
+        case .notRegistered:return (.off,L("未开启；仅勾选后才会注册登录项。"))
+        @unknown default:return (.off,L("无法确认登录项状态。"))
         }
     }
 }

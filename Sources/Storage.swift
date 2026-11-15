@@ -51,19 +51,19 @@ final class CaptureStorage {
                 try FileManager.default.copyItem(at: source, to: dest)
                 let a = try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber
                 let b = try FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? NSNumber
-                guard a == b, (b?.int64Value ?? 0) > 0, FileManager.default.contentsEqual(atPath:source.path,andPath:dest.path) else { throw CaptureFailure.message("保存校验失败，原文件仍在待保存目录。") }
+                guard a == b, (b?.int64Value ?? 0) > 0, FileManager.default.contentsEqual(atPath:source.path,andPath:dest.path) else { throw CaptureFailure.message(L("保存校验失败，原文件仍在待保存目录。")) }
                 // Only the app-created, verified duplicate is removed. Never remove user originals.
                 try? FileManager.default.removeItem(at: source)
                 return dest
             }
         }
         if let coordinationError { throw coordinationError }
-        guard let result else { throw CaptureFailure.message("无法访问保存文件夹。") }
+        guard let result else { throw CaptureFailure.message(L("无法访问保存文件夹。")) }
         return try result.get()
     }
     static func writePNG(_ image: CGImage) throws -> URL {
         let rep = NSBitmapImageRep(cgImage: image)
-        guard let data = rep.representation(using: .png, properties: [:]) else { throw CaptureFailure.message("无法编码截图。") }
+        guard let data = rep.representation(using: .png, properties: [:]) else { throw CaptureFailure.message(L("无法编码截图。")) }
         let url = try temporaryURL(ext: "png")
         try data.write(to: url, options: .atomic)
         return url

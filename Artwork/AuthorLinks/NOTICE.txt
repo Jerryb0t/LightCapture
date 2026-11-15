@@ -1,0 +1,6 @@
+GitHub and X logos are trademarks of their respective owners, not licensed under this project's MIT license.
+Unmodified source files downloaded from official brand kits, used only to identify links to the author's profiles. No affiliation or endorsement is implied.
+GitHub source: https://brand.github.com/GitHub_Logos.zip (GitHub_Invertocat_Black_Clearspace.png)
+Guidelines: https://brand.github.com/foundations/logo
+X source: https://about.x.com/en/who-we-are/brand-toolkit (logo-black.png in official x-logo.zip)
+Displayed proportionally using macOS monochrome template rendering for light/dark backgrounds; original asset bytes are unchanged.

@@ -4,7 +4,7 @@ import Foundation
 /// Result delivery is generation-gated; late results cannot mutate a retry/session.
 @MainActor final class DeadlineRequest<Value> {
     enum Failure:LocalizedError {case timeout
-        var errorDescription:String? {"系统屏幕服务响应超时，已取消本次操作。可以重试；若仍超时，请退出后重新打开轻截。"}
+        var errorDescription:String? {L("系统屏幕服务响应超时，已取消本次操作。可以重试；若仍超时，请退出后重新打开轻截。")}
     }
     private var worker:Task<Void,Never>?
     private var deadline:Task<Void,Never>?

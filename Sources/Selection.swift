@@ -94,16 +94,16 @@ final class SelectionView: NSView {
     var selectedMode:CaptureMode {CaptureMode(rawValue:modePicker.indexOfSelectedItem) ?? .screenshot}
     func setMode(_ mode:CaptureMode){modePicker.selectItem(at:mode.rawValue);updateMode()}
     @objc private func updateMode(){annotateButton.isEnabled = pendingRect != nil && selectedMode == .screenshot}
-    private let annotateButton = NSButton(title:"标注…",target:nil,action:nil)
-    private let confirmButton = NSButton(title:"确认 ↩",target:nil,action:nil)
-    private let cancelButton = NSButton(title:"取消 Esc",target:nil,action:nil)
+    private let annotateButton = NSButton(title:L("标注…"),target:nil,action:nil)
+    private let confirmButton = NSButton(title:L("确认 ↩"),target:nil,action:nil)
+    private let cancelButton = NSButton(title:L("取消 Esc"),target:nil,action:nil)
     override init(frame: NSRect) {
         super.init(frame:frame)
         confirmButton.target=self;confirmButton.action=#selector(confirmSelection)
         cancelButton.target=self;cancelButton.action=#selector(cancelSelection)
         confirmButton.bezelStyle = .rounded;cancelButton.bezelStyle = .rounded
         confirmButton.isEnabled=false;annotateButton.isEnabled=false
-        modePicker.addItems(withTitles:["截图","录屏","长截图"]);modePicker.target=self;modePicker.action=#selector(updateMode)
+        modePicker.addItems(withTitles:[L("截图"),L("录屏"),L("长截图")]);modePicker.target=self;modePicker.action=#selector(updateMode)
         annotateButton.target=self;annotateButton.action=#selector(annotateSelection);annotateButton.bezelStyle = .rounded
         toolbar.material = .hudWindow;toolbar.blendingMode = .withinWindow;toolbar.state = .active
         toolbar.wantsLayer=true;toolbar.layer?.cornerRadius=10;toolbar.layer?.masksToBounds=true
@@ -115,7 +115,8 @@ final class SelectionView: NSView {
     required init?(coder:NSCoder){fatalError("init(coder:) has not been implemented")}
     override func layout(){
         super.layout()
-        let width:CGFloat=350,height:CGFloat=44,padding:CGFloat=10
+        let widths=[max(88,modePicker.intrinsicContentSize.width),max(66,annotateButton.intrinsicContentSize.width),max(80,cancelButton.intrinsicContentSize.width),max(90,confirmButton.intrinsicContentSize.width)]
+        let width:CGFloat=widths.reduce(0,+)+26,height:CGFloat=44,padding:CGFloat=10
         let anchor=pendingRect
         let x=min(max(padding,(anchor?.maxX ?? bounds.maxX)-width),max(padding,bounds.width-width-padding))
         let preferredY:CGFloat
@@ -123,10 +124,10 @@ final class SelectionView: NSView {
         else {preferredY=bounds.height-height-padding}
         let y=min(max(padding,preferredY),max(padding,bounds.height-height-padding))
         toolbar.frame=NSRect(x:x,y:y,width:width,height:height)
-        modePicker.frame=NSRect(x:8,y:7,width:88,height:30)
-        confirmButton.frame=NSRect(x:252,y:7,width:90,height:30)
-        annotateButton.frame=NSRect(x:100,y:7,width:66,height:30)
-        cancelButton.frame=NSRect(x:168,y:7,width:80,height:30)
+        var nextX:CGFloat=8
+        for (index,view) in [modePicker,annotateButton,cancelButton,confirmButton].enumerated(){
+            view.frame=NSRect(x:nextX,y:7,width:widths[index],height:30);nextX += widths[index]+4
+        }
     }
     override func acceptsFirstMouse(for event:NSEvent?)->Bool {true}
     @objc func confirmSelection(){
@@ -167,7 +168,7 @@ final class SelectionView: NSView {
             NSColor.black.withAlphaComponent(0.02).setFill(); r.fill(using: .copy)
             NSColor.systemCyan.setStroke(); let p = NSBezierPath(rect:r); p.lineWidth=2; p.stroke()
         }
-        let text = pendingRect == nil ? "拖动选区 · 双击已选区域确认 · Esc 取消" : ""
+        let text = pendingRect == nil ? L("拖动选区 · 双击已选区域确认 · Esc 取消") : ""
         text.draw(at: CGPoint(x:24,y:bounds.height-40), withAttributes: [.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:NSColor.white])
     }
     override func mouseDown(with event:NSEvent) { guard !completed else{return};CaptureDiagnostics.record(.mouseDown)

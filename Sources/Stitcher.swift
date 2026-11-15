@@ -10,11 +10,11 @@ enum StitchError: LocalizedError {
     case incompatibleSize, imageTooLarge, cannotDecode, noOverlap, ambiguousOverlap
     var errorDescription: String? {
         switch self {
-        case .incompatibleSize: return "截图宽度不一致，或图片太小。请保持同一选区和缩放比例。"
-        case .imageTooLarge: return "长截图已达到安全大小上限，请先保存，再开始新的长截图。"
-        case .cannotDecode: return "无法读取截图像素。"
-        case .noOverlap: return "没有找到可靠的重叠区域。请向下滚动少一点，并避开固定页头和动态内容。"
-        case .ambiguousOverlap: return "画面过于重复或空白，无法可靠拼接。请换一个包含明显文字或图案的位置。"
+        case .incompatibleSize: return L("截图宽度不一致，或图片太小。请保持同一选区和缩放比例。")
+        case .imageTooLarge: return L("长截图已达到安全大小上限，请先保存，再开始新的长截图。")
+        case .cannotDecode: return L("无法读取截图像素。")
+        case .noOverlap: return L("没有找到可靠的重叠区域。请向下滚动少一点，并避开固定页头和动态内容。")
+        case .ambiguousOverlap: return L("画面过于重复或空白，无法可靠拼接。请换一个包含明显文字或图案的位置。")
         }
     }
 }

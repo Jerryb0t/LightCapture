@@ -40,7 +40,7 @@ import AVFoundation
     }
     static func filter(target: CaptureTarget, content: SCShareableContent, recording:Bool = false) throws -> SCContentFilter {
         if !recording, let window = target.window {
-            guard let current = content.windows.first(where:{$0.windowID == window.windowID}) else {throw CaptureFailure.message("目标窗口已关闭，请重新选择。")};return SCContentFilter(desktopIndependentWindow:current)
+            guard let current = content.windows.first(where:{$0.windowID == window.windowID}) else {throw CaptureFailure.message(L("目标窗口已关闭，请重新选择。"))};return SCContentFilter(desktopIndependentWindow:current)
         }
         let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
         // Application exclusion also covers controls created after this snapshot.
@@ -48,7 +48,7 @@ import AVFoundation
     }
     static func screenshot(target: CaptureTarget) async throws -> CGImage {
         let content = try await content()
-        guard content.displays.contains(where: {$0.displayID == target.display.displayID}) else { throw CaptureFailure.message("屏幕已断开，请重新选择区域。") }
+        guard content.displays.contains(where: {$0.displayID == target.display.displayID}) else { throw CaptureFailure.message(L("屏幕已断开，请重新选择区域。")) }
         let filter = try filter(target:target,content:content)
         let config = configuration(target:target,recording:false)
         if target.window != nil {
@@ -60,11 +60,11 @@ import AVFoundation
         return try await SCScreenshotManager.captureImage(contentFilter:filter,configuration:config)
     }
     func start(target: CaptureTarget, systemAudio: Bool, highQuality: Bool, completion: @escaping (Result<URL,Error>) -> Void) async throws {
-        guard stream == nil else {throw CaptureFailure.message("已有录屏任务。")}
+        guard stream == nil else {throw CaptureFailure.message(L("已有录屏任务。"))}
         let content:SCShareableContent=try await withCheckedThrowingContinuation{ continuation in
             recordingContentDeadline.start(seconds:8,operation:{try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:false)},completion:{continuation.resume(with:$0)})
         }
-        guard content.displays.contains(where:{$0.displayID == target.display.displayID}) else{throw CaptureFailure.message("屏幕已断开。")}
+        guard content.displays.contains(where:{$0.displayID == target.display.displayID}) else{throw CaptureFailure.message(L("屏幕已断开。"))}
         let url=try CaptureStorage.temporaryURL(ext:"mp4")
         let config=Self.configuration(target:target,recording:true,systemAudio:systemAudio,highQuality:highQuality)
         let token=UUID();sessionID=token;stopping=false
@@ -81,7 +81,7 @@ import AVFoundation
             firstFrameDeadline=Task{[weak self,weak stream,weak movie] in
                 do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{return}
                 guard let self,self.sessionID == token,self.firstFrameDeadline != nil else{return}
-                movie?.abort();self.finish(.failure(CaptureFailure.message("10 秒内未收到首个可用视频帧，已取消录屏，请重试。")))
+                movie?.abort();self.finish(.failure(CaptureFailure.message(L("10 秒内未收到首个可用视频帧，已取消录屏，请重试。"))))
                 if let stream {try? await stream.stopCapture()}
             }
             try await stream.startCapture()
