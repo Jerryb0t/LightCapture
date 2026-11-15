@@ -6,6 +6,10 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 [简体中文](README.md)
 
+**Download [LightCapture 0.2.3](https://github.com/Jerryb0t/LightCapture/releases/tag/v0.2.3)** (Apple silicon, macOS 15+)
+
+**Idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
+
 ## Using LightCapture
 
 - Press **Control+A** to select a region or snap to a window. The selection toolbar switches between screenshots, scrolling capture, and recording. **Enter** copies and saves a screenshot by default; settings can make it copy-only.

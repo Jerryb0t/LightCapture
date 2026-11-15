@@ -4,6 +4,10 @@
 
 一个原生、精简的 macOS 截图与录屏工具。Swift + AppKit + ScreenCaptureKit，截图和录屏使用系统框架，不需要账号；只有检查更新或主动安装新版才访问 GitHub。MIT 开源。
 
+**下载：[轻截 0.2.3](https://github.com/Jerryb0t/LightCapture/releases/tag/v0.2.3)**（Apple Silicon，macOS 15+）
+
+**后台实测：约 29 MB。** MacBook Air M5（16 GB，macOS 27.2.1），系统隐藏应用窗口后闲置 90 秒，分别在 30、60、90 秒测得应用物理内存均约 29 MB。未在录屏中测量；RSS 约 101 MB，与物理占用不是同一口径。
+
 ## 功能
 
 - 区域、窗口吸附及全屏截图，简单画笔、箭头、矩形、文字标注。
