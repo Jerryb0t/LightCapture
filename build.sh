@@ -1,0 +1,28 @@
+#!/bin/zsh
+set -euo pipefail
+cd "${0:A:h}"
+APP="${APP_OUTPUT:-$PWD/build/轻截.app}"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$PWD/Artwork/LightCaptureIcon.icns" "$APP/Contents/Resources/LightCaptureIcon.icns"
+xcrun swiftc -module-cache-path "$PWD/build/ModuleCache" -swift-version 5 -O -target arm64-apple-macosx15.0 Sources/*.swift -o "$APP/Contents/MacOS/LightCapture" -framework AppKit -framework ScreenCaptureKit -framework AVFoundation -framework Carbon
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>local.jerry.lightcapture</string>
+<key>CFBundleName</key><string>轻截</string>
+<key>CFBundleDisplayName</key><string>轻截</string>
+<key>CFBundleIconFile</key><string>LightCaptureIcon.icns</string>
+<key>CFBundleExecutable</key><string>LightCapture</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>15.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSScreenCaptureUsageDescription</key><string>仅在你主动截图或录屏时读取所选屏幕内容。</string>
+</dict></plist>
+PLIST
+if [[ -n "${BUNDLE_ID:-}" ]]; then /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"; fi
+codesign --force --timestamp=none --sign "${SIGN_IDENTITY:--}" "$APP"
+codesign --verify --deep --strict "$APP"
+echo "$APP"
