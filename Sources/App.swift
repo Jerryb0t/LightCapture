@@ -40,7 +40,7 @@ import Carbon
     var shortcutMonitor: Any?
     var shortcutButton: NSButton!
     var shortcutLabel: NSTextField!
-    let contentRequest=DeadlineRequest<SCShareableContent>()
+    let contentRequest=DeadlineRequest<PreparedCapture>()
     let screenshotRequest=DeadlineRequest<CGImage>()
     private let cancelPreparationButton=NSButton(title:L("取消准备 Esc"),target:nil,action:nil)
     private var feedbackPanel:NSPanel?
@@ -99,6 +99,7 @@ import Carbon
         detail.font = .systemFont(ofSize:10);detail.textColor = .secondaryLabelColor;root.addArrangedSubview(detail);detail.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
         let footer=NSStackView(views:[authorLinks.followButton,authorLinks.button]);footer.spacing=20
         root.addArrangedSubview(footer)
+        selector.failure = {[weak self] error in self?.setBusy(false);self?.report(error)}
         recorder.started = { [weak self] in Task { @MainActor in self?.didStartRecording() } }
     }
     func actionButton(_ title:String,symbol:String,action:Selector)->NSButton {
@@ -195,21 +196,22 @@ import Carbon
     }
     func prepare(region:Bool,windowSnap:Bool=false,mode:CaptureMode = .screenshot,then:@escaping(CaptureTarget)->Void){
         guard !busy,shortcutMonitor == nil else{return}
-        authorLinks.dismiss()
-        feedbackDismiss?.cancel();feedbackDismiss=nil;feedbackPanel?.close();feedbackPanel=nil
+        // Preserve third-party transient panels until pixels and candidates are frozen.
         setBusy(true);guard permission() else{setBusy(false);return}
         let restoreLaunchWindow=window.isVisible
         status.stringValue=L("正在读取可用窗口…（最多等待 8 秒）");cancelPreparationButton.isHidden=false
-        if !visibility.background{showWindow()};CaptureDiagnostics.record(.windowListBegin)
-        contentRequest.start(seconds:8,operation:{try await CaptureEngine.content()}){[weak self] result in
+        CaptureDiagnostics.record(.windowListBegin)
+        contentRequest.start(seconds:8,operation:{try await FrozenCapture.prepare(freeze:region || mode == .screenshot,liveFallback:mode != .screenshot)}){[weak self] result in
             guard let self else{return};self.cancelPreparationButton.isHidden=true
             switch result {
             case .failure(let error):
                 CaptureDiagnostics.record(.windowListFailed,error:error);self.setBusy(false);self.showFeedback(L("读取窗口失败，可重试"),failure:true);self.report(error)
-            case .success(let content):
+            case .success(let prepared):
+                let content=prepared.content
+                self.authorLinks.dismiss();self.feedbackDismiss?.cancel();self.feedbackDismiss=nil;self.feedbackPanel?.close();self.feedbackPanel=nil
                 CaptureDiagnostics.record(.windowListComplete);self.window.orderOut(nil)
                 if region {
-                    self.selector.begin(displays:content.displays,availableWindows:windowSnap ? content.windows : [],mode:mode){[weak self] target in
+                    self.selector.begin(displays:content.displays,availableWindows:windowSnap ? content.windows : [],mode:mode,frames:prepared.frames,windowOrder:windowSnap ? prepared.order : [],notice:prepared.notice,allowsScreenshot:prepared.screenshotAvailable){[weak self] target in
                         guard let self else{return}
                         if let target{then(target)}else{self.setBusy(false);self.status.stringValue=L("已取消。");if restoreLaunchWindow && !self.visibility.background{self.showWindow()}}
                     }
@@ -218,7 +220,11 @@ import Carbon
                     let id=(screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
                     guard let display=content.displays.first(where:{$0.displayID==id}) ?? content.displays.first else{self.setBusy(false);self.report(CaptureFailure.message(L("找不到可捕获的屏幕。")));return}
                     let rect=CGRect(x:0,y:0,width:screen?.frame.width ?? CGFloat(display.width),height:screen?.frame.height ?? CGFloat(display.height))
-                    then(CaptureTarget(display:display,rect:rect))
+                    do{
+                        let image=mode == .screenshot ? try prepared.frames[display.displayID]?.crop(rect) : nil
+                        if mode == .screenshot && image == nil {throw CaptureFailure.message(L("冻结画面不可用，请保持鼠标在目标屏幕后重试。"))}
+                        then(CaptureTarget(display:display,rect:rect,mode:mode,frozenImage:image))
+                    }catch{self.setBusy(false);self.report(error)}
                 }
             }
         }
@@ -226,21 +232,18 @@ import Carbon
     @objc func screenshot(){prepare(region:true,windowSnap:true){[weak self] target in self?.takeScreenshot(target)}}
     @objc func fullScreenshot(){prepare(region:false){[weak self] target in self?.takeScreenshot(target)}}
     func takeScreenshot(_ target:CaptureTarget){
-        var selected=target;selected.window=nil
+        var selected=target;selected.window=nil;selected.frozenImage=nil
         if target.mode == .recording {beginRecording(selected);return}
         if target.mode == .longScreenshot {beginLong(selected);return}
         CaptureDiagnostics.record(.captureBegin)
-        screenshotRequest.start(seconds:8,operation:{
-            try await Task.sleep(nanoseconds:200_000_000)
-            return try await CaptureEngine.screenshot(target:target)
-        }){[weak self] result in
-            guard let self else{return}
-            do{
-                let image=try result.get();CaptureDiagnostics.record(.captureComplete)
-                if target.annotationRequested{self.showEditor(image,category:"截图",target:target)}else{try self.finalizeScreenshot(image)}
-            }catch{CaptureDiagnostics.record(.captureFailed,error:error);self.setBusy(false);self.showFeedback(L("截图未完成，请重试"),failure:true);self.report(error)}
+        if let image=target.frozenImage {
+            do{CaptureDiagnostics.record(.captureComplete);if target.annotationRequested{showEditor(image,category:"截图",target:selected)}else{try finalizeScreenshot(image)}}
+            catch{setBusy(false);report(error)}
+            return
         }
+        setBusy(false);report(CaptureFailure.message(L("冻结画面不可用，请保持鼠标在目标屏幕后重试。")))
     }
+
     func finalizeScreenshot(_ image:CGImage) throws {
         try ScreenshotDelivery.finalize(image,copyOnly:copyOnly.state == .on,copy:{image in
             guard let data=NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:]) else{CaptureDiagnostics.record(.clipboardFailed);return false}
@@ -249,7 +252,7 @@ import Carbon
         if copyOnly.state == .on {setBusy(false);status.stringValue=L("已复制截图，未保存文件。");showFeedback(L("已复制 · 未保存文件"))}
     }
     func showEditor(_ image:CGImage,category:String,target:CaptureTarget?=nil){
-        var region=target;region?.window=nil
+        var region=target;region?.window=nil;region?.frozenImage=nil
         let onRecord:(()->Void)? = region.map { selected in { [weak self] in self?.editor=nil;self?.beginRecording(selected) } }
         let onLong:(()->Void)? = region.map { selected in { [weak self] in self?.editor=nil;self?.beginLong(selected) } }
         editor=CaptureEditor(image:image,onSave:{[weak self] image in self?.editor=nil;self?.saveImage(image,category:category)},onCancel:{[weak self] in self?.editor=nil;self?.setBusy(false);self?.status.stringValue=L("已结束截图。")},onRecord:onRecord,onLong:onLong,copyOnly:copyOnly.state == .on)
@@ -336,7 +339,7 @@ import Carbon
     }
     @objc func resumeLong(){dismissControls();showLongControls()}
     @objc func saveLong(){guard let image=composite else{return};longSampler.stop();dismissControls();composite=nil;lastLongSignature=nil;longTarget=nil;showEditor(image,category:"长截图")}
-    @objc func fullRecording(){prepare(region:false){[weak self] target in self?.beginRecording(target)}}
+    @objc func fullRecording(){prepare(region:false,mode:.recording){[weak self] target in self?.beginRecording(target)}}
     @objc func regionRecording(){prepare(region:true,mode:.recording){[weak self] target in self?.takeScreenshot(target)}}
     func beginRecording(_ target:CaptureTarget){
         recordingRoot=storage.root;recordingTarget=target;stopPending=false;updateRecordingControls(.starting)

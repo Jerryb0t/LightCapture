@@ -15,7 +15,7 @@ private func precondition(_ condition:@autoclosure ()->Bool,_ message:@autoclosu
   for language in ["en","zh-Hans"] {
    let url=root.appendingPathComponent(language+".lproj/Localizable.strings")
    let dict=NSDictionary(contentsOf:url) as! [String:String]
-   precondition(dict.count==155)
+   precondition(dict.count==161)
    for (key,value) in dict {precondition(key.components(separatedBy:"%@").count==value.components(separatedBy:"%@").count)}
   }
   let app=AppDelegate();app.buildUI();app.window.contentView!.layoutSubtreeIfNeeded()
@@ -47,6 +47,6 @@ private func precondition(_ condition:@autoclosure ()->Bool,_ message:@autoclosu
   }
   precondition(!app.window.isVisible && app.authorLinks.popover?.isShown != true)
   precondition(L("已保存：%@","sample.png").contains("sample.png"))
-  print("PASS "+expected+": 155 resource keys/format counts, injected resource-bundle lookup, injected filename, settings/actions/footer fit, no visible UI")
+  print("PASS "+expected+": 161 resource keys/format counts, injected resource-bundle lookup, injected filename, settings/actions/footer fit, no visible UI")
  }
 }

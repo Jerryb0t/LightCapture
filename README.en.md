@@ -20,6 +20,14 @@ The app supports Simplified Chinese and English in one build. It follows the sys
 
 Two separate footer entries keep things simple: **👋 Follow the Author** contains only the [GitHub](https://github.com/Jerryb0t) and [X](https://x.com/Jerryb0t) profile links; **☕ Support the Author** contains only optional support methods. Popovers and images are created on demand and released after dismissal, with no additional persistent timers or network requests. No unmeasured memory savings are claimed. Optional WeChat Pay, Alipay, and OKX Pay QR codes appear only after an explicit selection, one at a time. Support is voluntary: verify the recipient in your own payment app before paying. LightCapture never initiates or processes payments, confirms receipt, or contacts payment services.
 
+## Frozen screenshot selection
+
+LightCapture takes a one-shot screen snapshot and window-order metadata before showing selection overlays. Confirmation and annotation crop those original pixels instead of recapturing a menu that may have closed. Visible popup windows can snap when system metadata supports them, and manual selection remains available. Protected content, popups that disappear before prefetch, and some special windows may still be unavailable; not every popup is guaranteed to work.
+
+Preview references are released on cancel or confirmation. The total snapshot budget is 24 million pixels. If multiple displays exceed it, only the display under the pointer is frozen, with an explanatory hint. Move the pointer and start again for another display. Regional crops copy out compact pixels. This budget is not a measured process-memory figure; a stalled system screenshot API can delay release of an old request's resources. Recording and scrolling capture stay live. If freezing fails when starting either live mode, ordinary screenshots are disabled for that selection rather than silently recaptured.
+
+Synthetic pixel, Retina, window-layer, lifecycle, selection and bilingual layout tests pass. This frozen-selection update has not received an actual on-screen popup end-to-end validation.
+
 ## Build from source
 
 Requires **Apple silicon (arm64)**, **macOS 15 or later**, and the Apple Xcode Command Line Tools with a compatible macOS SDK.

@@ -9,42 +9,48 @@ struct CaptureTarget {
     var window: SCWindow? = nil
     var annotationRequested = false
     var mode:CaptureMode = .screenshot
+    var frozenImage:CGImage? = nil
 }
 
 @MainActor final class SelectionController {
+    var failure:((Error)->Void)?
     private var windows: [NSWindow] = []
     private var completion: ((CaptureTarget?) -> Void)?
-    func begin(displays: [SCDisplay], availableWindows: [SCWindow] = [], mode:CaptureMode = .screenshot, completion: @escaping (CaptureTarget?) -> Void) {
+    func begin(displays: [SCDisplay], availableWindows: [SCWindow] = [], mode:CaptureMode = .screenshot, frames:[CGDirectDisplayID:FrozenFrame] = [:], windowOrder:[[String:Any]] = [], notice:String? = nil, allowsScreenshot:Bool = true, completion: @escaping (CaptureTarget?) -> Void) {
         cancel(notify: false)
         self.completion = completion
         for screen in NSScreen.screens {
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
                   let display = displays.first(where: { $0.displayID == id.uint32Value }) else { continue }
+            if !frames.isEmpty && frames[display.displayID] == nil {continue}
+            let frozen=frames[display.displayID]
+            if let frozen,frozen.logicalSize != screen.frame.size{cancel(notify:false);failure?(CaptureFailure.message(L("屏幕布局已变化，请重新截图。")));return}
             let win = SelectionWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             win.isReleasedWhenClosed = false; win.acceptsMouseMovedEvents = true
             win.isOpaque = false; win.backgroundColor = .clear; win.level = .screenSaver
             win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
-            view.setMode(mode)
+            view.setMode(mode);view.setScreenshotAllowed(allowsScreenshot);view.frozenImage=frozen?.image;view.notice=notice
             let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
-            let ordered = (CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements], kCGNullWindowID) as? [[String:Any]]) ?? []
-            view.candidates = ordered.compactMap { info in
-                guard let number = info[kCGWindowNumber as String] as? NSNumber,
-                      (info[kCGWindowLayer as String] as? Int) == 0,
-                      let candidate = availableWindows.first(where: { $0.windowID == number.uint32Value }),
-                      candidate.owningApplication?.processID != ProcessInfo.processInfo.processIdentifier,
-                      candidate.frame.width > 40, candidate.frame.height > 40 else { return nil }
-                let global = CGRect(x:candidate.frame.minX,y:primaryHeight-candidate.frame.maxY,width:candidate.frame.width,height:candidate.frame.height)
-                let local = global.offsetBy(dx:-screen.frame.minX,dy:-screen.frame.minY).intersection(view.bounds)
+            view.candidates = windowOrder.compactMap { info in
+                guard let number=info[kCGWindowNumber as String] as? NSNumber,
+                      let bounds=info[kCGWindowBounds as String] as? [String:Any],let raw=CGRect(dictionaryRepresentation:bounds as CFDictionary) else{return nil}
+                let candidate=availableWindows.first{$0.windowID==number.uint32Value}
+                let global=CGRect(x:raw.minX,y:primaryHeight-raw.maxY,width:raw.width,height:raw.height)
+                guard WindowSnapPolicy.permits(layer:info[kCGWindowLayer as String] as? Int ?? -1,alpha:info[kCGWindowAlpha as String] as? Double ?? 1,frame:global,displayBounds:screen.frame,owner:info[kCGWindowOwnerName as String] as? String ?? "",isOwn:(info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value==ProcessInfo.processInfo.processIdentifier) else{return nil}
+                let local=global.offsetBy(dx:-screen.frame.minX,dy:-screen.frame.minY).intersection(view.bounds)
                 return local.isEmpty ? nil : (local,candidate)
             }
             view.finished = { [weak self, weak view] rect, selectedWindow, annotate in
                 guard let self else { return }
                 if let rect {
-                    let converted = CGRect(x: rect.minX, y: screen.frame.height - rect.maxY, width: rect.width, height: rect.height).integral
+                    let converted = CGRect(x: rect.minX, y: screen.frame.height - rect.maxY, width: rect.width, height: rect.height)
                     let selectedMode=view?.selectedMode ?? .screenshot
+                    let cropped:CGImage?
+                    do{cropped=selectedMode == .screenshot ? try frozen?.crop(converted) : nil}
+                    catch{let failure=self.failure;self.cancel(notify:false);failure?(error);return}
                     let cb = self.completion; self.cancel(notify: false)
-                    cb?(CaptureTarget(display: display, rect: converted, window: selectedWindow, annotationRequested: annotate, mode:selectedMode))
+                    cb?(CaptureTarget(display: display, rect: converted, window: selectedWindow, annotationRequested: annotate, mode:selectedMode,frozenImage:cropped))
                 } else { self.cancel(notify: true) }
             }
             view.hovered = view.candidates.first(where:{$0.0.contains(CGPoint(x:NSEvent.mouseLocation.x-screen.frame.minX,y:NSEvent.mouseLocation.y-screen.frame.minY))})
@@ -63,7 +69,7 @@ struct CaptureTarget {
         for window in windows {
             window.orderOut(nil)
             if let view = window.contentView as? SelectionView {
-                view.finished = nil; view.candidates.removeAll(); view.hovered = nil
+                view.finished = nil;view.frozenImage=nil; view.candidates.removeAll(); view.hovered = nil
             }
             window.contentView = nil
             window.close()
@@ -83,9 +89,11 @@ final class SelectionWindow: NSWindow {
     }
 }
 final class SelectionView: NSView {
+    var frozenImage:CGImage?
+    var notice:String?
     var finished: ((CGRect?, SCWindow?, Bool) -> Void)?
-    var candidates: [(CGRect,SCWindow)] = []
-    var hovered: (CGRect,SCWindow)?
+    var candidates: [(CGRect,SCWindow?)] = []
+    var hovered: (CGRect,SCWindow?)?
     private(set) var pendingRect: CGRect?
     private var pendingWindow: SCWindow?
     private var completed = false
@@ -93,6 +101,7 @@ final class SelectionView: NSView {
     private let modePicker = NSPopUpButton()
     var selectedMode:CaptureMode {CaptureMode(rawValue:modePicker.indexOfSelectedItem) ?? .screenshot}
     func setMode(_ mode:CaptureMode){modePicker.selectItem(at:mode.rawValue);updateMode()}
+    func setScreenshotAllowed(_ allowed:Bool){modePicker.item(at:0)?.isEnabled=allowed;updateMode()}
     @objc private func updateMode(){annotateButton.isEnabled = pendingRect != nil && selectedMode == .screenshot}
     private let annotateButton = NSButton(title:L("标注…"),target:nil,action:nil)
     private let confirmButton = NSButton(title:L("确认 ↩"),target:nil,action:nil)
@@ -133,13 +142,13 @@ final class SelectionView: NSView {
     @objc func confirmSelection(){
         guard !completed,let rect=pendingRect else{return}
         CaptureDiagnostics.record(.buttonConfirm)
-        completed=true;finished?(rect,pendingWindow,false)
+        completed=true;frozenImage=nil;finished?(rect,pendingWindow,false)
     }
     @objc func annotateSelection(){
         guard !completed,let rect=pendingRect else{return}
-        completed=true;finished?(rect,pendingWindow,true)
+        completed=true;frozenImage=nil;finished?(rect,pendingWindow,true)
     }
-    @objc func cancelSelection(){guard !completed else{return};CaptureDiagnostics.record(.cancel);completed=true;finished?(nil,nil,false)}
+    @objc func cancelSelection(){guard !completed else{return};CaptureDiagnostics.record(.cancel);completed=true;frozenImage=nil;finished?(nil,nil,false)}
     override func cancelOperation(_ sender:Any?){cancelSelection()}
     override func performKeyEquivalent(with event:NSEvent)->Bool {
         if event.keyCode == 53 {cancelSelection();return true}
@@ -162,13 +171,17 @@ final class SelectionView: NSView {
         return CGRect(x: min(a.x,b.x), y: min(a.y,b.y), width: abs(a.x-b.x), height: abs(a.y-b.y)).intersection(bounds)
     }
     override func draw(_ dirtyRect: NSRect) {
+        if let image=frozenImage{NSImage(cgImage:image,size:bounds.size).draw(in:bounds)}
         NSColor.black.withAlphaComponent(0.25).setFill(); bounds.fill()
         if let r = (selected.flatMap { $0.width > 4 && $0.height > 4 ? $0 : nil } ?? pendingRect ?? hovered?.0) {
             // Keep hit-testing surface nontransparent so clicks do not pass through to another app.
-            NSColor.black.withAlphaComponent(0.02).setFill(); r.fill(using: .copy)
+            if let image=frozenImage{
+                NSGraphicsContext.saveGraphicsState();r.clip();NSImage(cgImage:image,size:bounds.size).draw(in:bounds);NSGraphicsContext.restoreGraphicsState()
+            }else{NSColor.black.withAlphaComponent(0.02).setFill(); r.fill(using: .copy)}
             NSColor.systemCyan.setStroke(); let p = NSBezierPath(rect:r); p.lineWidth=2; p.stroke()
         }
         let text = pendingRect == nil ? L("拖动选区 · 双击已选区域确认 · Esc 取消") : ""
+        if let notice {notice.draw(at:CGPoint(x:24,y:bounds.height-62),withAttributes:[.font:NSFont.systemFont(ofSize:11),.foregroundColor:NSColor.white])}
         text.draw(at: CGPoint(x:24,y:bounds.height-40), withAttributes: [.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:NSColor.white])
     }
     override func mouseDown(with event:NSEvent) { guard !completed else{return};CaptureDiagnostics.record(.mouseDown)
