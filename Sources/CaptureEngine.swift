@@ -44,7 +44,6 @@ import AVFoundation
             guard let current = content.windows.first(where:{$0.windowID == window.windowID}) else {throw CaptureFailure.message(L("目标窗口已关闭，请重新选择。"))};return SCContentFilter(desktopIndependentWindow:current)
         }
         let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
-        if target.mode == .longScreenshot && own.isEmpty {throw CaptureFailure.message(L("无法排除长截图边框，请重新选择。"))}
         // Application exclusion also covers controls created after this snapshot.
         return SCContentFilter(display: target.display, excludingApplications: own, exceptingWindows: [])
     }
@@ -60,6 +59,22 @@ import AVFoundation
             config.ignoreShadowsSingleWindow = true
         }
         return try await SCScreenshotManager.captureImage(contentFilter:filter,configuration:config)
+    }
+    /// Enumerate once per selected region rather than once for every frame.
+    /// The marker lies outside the region and is non-shareable; do not require
+    /// our process to appear in the system's shareable application inventory.
+    static func prepareLongFrameSource(target:CaptureTarget) async throws -> LongCaptureSession.FrameSource {
+        let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:false)
+        try Task.checkCancellation()
+        guard content.displays.contains(where:{$0.displayID == target.display.displayID}) else{
+            throw CaptureFailure.message(L("屏幕已断开，请重新选择区域。"))
+        }
+        let filter=try filter(target:target,content:content)
+        let configuration=configuration(target:target,recording:false)
+        return {
+            try Task.checkCancellation()
+            return try await SCScreenshotManager.captureImage(contentFilter:filter,configuration:configuration)
+        }
     }
     func start(target: CaptureTarget, systemAudio: Bool, microphone:Bool = false, highQuality: Bool, frameRate:RecordingFrameRate = .fps30, completion: @escaping (Result<URL,Error>) -> Void) async throws {
         guard stream == nil else {throw CaptureFailure.message(L("已有录屏任务。"))}

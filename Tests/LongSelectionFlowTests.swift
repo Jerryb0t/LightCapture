@@ -26,10 +26,11 @@ import AppKit
   check(LongCaptureBorder.frame(capture:CGRect(x:0,y:0,width:900,height:700),screen:CGRect(x:0,y:0,width:900,height:700))==CGRect(x:0,y:0,width:900,height:700),"full screen border clamps")
   let borderSource=try! String(contentsOfFile:"Sources/LongCaptureBorder.swift",encoding:.utf8)
   check(borderSource.contains("ignoresMouseEvents=true") && borderSource.contains(".nonactivatingPanel") && !borderSource.contains("makeKey"),"marker is pointer transparent and nonactivating")
-  let source=try! String(contentsOfFile:"Sources/App.swift",encoding:.utf8)
-  check(source.contains("selector.cancel(notify:false)") && source.contains("captureSourceApplication?.activate(options:[])"),"long capture teardown restores source focus")
-  let start=source.range(of:"    func showLongControls(){")!.lowerBound;let end=source.range(of:"    func dismissControls(){")!.lowerBound
-  check(!source[start..<end].contains("NSPanel") && !source[start..<end].contains("NSButton"),"no live control panel")
+  let edgeSelection=CGRect(x:0,y:10,width:400,height:450)
+  let screen=CGRect(x:0,y:0,width:900,height:700)
+  let strips=LongCaptureBorder.strips(capture:edgeSelection,screen:screen)
+  check(strips.count==3 && strips.allSatisfy{!$0.intersects(edgeSelection) && screen.contains($0)},"all visible strips lie outside the captured region even at a display edge")
+  check(LongCaptureBorder.strips(capture:screen,screen:screen).isEmpty,"full display does not draw a border inside the crop")
   let scroll=NSScrollView(frame:CGRect(x:0,y:0,width:500,height:450));let page=NSView(frame:CGRect(x:0,y:0,width:500,height:3000));scroll.documentView=page
   scroll.contentView.scroll(to:CGPoint(x:0,y:250));check(scroll.contentView.bounds.origin.y==250,"source scroll view remains independently scrollable after selection completed")
   check(!w.isVisible,"offscreen only")

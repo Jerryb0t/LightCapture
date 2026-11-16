@@ -16,6 +16,19 @@ enum WindowSnapCandidates {
         windows.map{SnapWindowRecord(id:$0.windowID,frame:$0.frame,layer:$0.windowLayer,alpha:1,
             owner:$0.owningApplication?.applicationName ?? "",pid:$0.owningApplication?.processID,onScreen:$0.isOnScreen)}
     }
+    static func owners(order:[[String:Any]],windows:[SCWindow])->[CGWindowID:pid_t] {
+        var owners=[CGWindowID:pid_t]()
+        for info in order {
+            if let id=(info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+               let pid=(info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,pid>0 {
+                owners[id]=pid
+            }
+        }
+        for window in windows {
+            if let pid=window.owningApplication?.processID,pid>0{owners[window.windowID]=pid}
+        }
+        return owners
+    }
     /// Quartz supplies front-to-back ordering where available. SCK is a fallback,
     /// not a fresh query after an overlay has dismissed a transient menu.
     static func make(order:[[String:Any]],fallback:[SnapWindowRecord],screen:CGRect,primaryHeight:CGFloat,ownPID:pid_t)->[(CGRect,CGWindowID)] {

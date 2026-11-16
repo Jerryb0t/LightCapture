@@ -142,6 +142,7 @@ enum CaptureEditorRenderer {
     private let onCancel: () -> Void
     private let onRecord: (() -> Void)?
     private let onLong: (() -> Void)?
+    private let beforeLong: (() -> String?)?
     private let copyOnly: Bool
     private let pasteboard: NSPasteboard
     private var modes: NSSegmentedControl!
@@ -151,10 +152,12 @@ enum CaptureEditorRenderer {
     private let message = NSTextField(labelWithString: L("原图保持不变 · 标注后保存或复制"))
     private var undoButton: NSButton!
     init(image: CGImage, onSave: @escaping(CGImage)->Void, onCancel: @escaping()->Void,
-         onRecord: (() -> Void)? = nil, onLong: (() -> Void)? = nil, copyOnly: Bool = false,
+         onRecord: (() -> Void)? = nil, onLong: (() -> Void)? = nil,
+         beforeLong: (() -> String?)? = nil, copyOnly: Bool = false,
          pasteboard: NSPasteboard = .general) {
         self.image = image; self.onSave = onSave; self.onCancel = onCancel
-        self.onRecord = onRecord; self.onLong = onLong; self.copyOnly = copyOnly; self.pasteboard = pasteboard
+        self.onRecord = onRecord; self.onLong = onLong; self.beforeLong = beforeLong
+        self.copyOnly = copyOnly; self.pasteboard = pasteboard
         canvas = CaptureEditorCanvas(image: image)
         super.init()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720), styleMask: [.titled,.closable,.resizable,.miniaturizable], backing: .buffered, defer: false)
@@ -208,12 +211,14 @@ enum CaptureEditorRenderer {
             }
         }
     }
-    @objc private func changeMode(_ sender: NSSegmentedControl) {
+    @objc func changeMode(_ sender: NSSegmentedControl) {
         guard !finished, window.attachedSheet == nil else { return }
         let action: (() -> Void)?
         switch sender.selectedSegment {
         case 1: action = onRecord
-        case 2: action = onLong
+        case 2:
+            if let error=beforeLong?(){message.stringValue=error;sender.selectedSegment=0;return}
+            action = onLong
         default: return
         }
         guard let action else { sender.selectedSegment = 0; return }

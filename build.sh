@@ -34,8 +34,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>LightCaptureIcon.icns</string>
 <key>CFBundleExecutable</key><string>LightCapture</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.5</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>0.2.7</string>
+<key>CFBundleVersion</key><string>9</string>
 <key>SUPublicEDKey</key><string>jOjSSTiLEE+Tq2zXuDxXGmbqxJcnYH/573AUAhein7k=</string>
 <key>SUFeedURL</key><string>https://raw.githubusercontent.com/Jerryb0t/LightCapture/main/appcast.xml</string>
 <key>SUEnableAutomaticChecks</key><false/>

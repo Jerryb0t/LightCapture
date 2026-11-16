@@ -61,10 +61,11 @@ final class CaptureStorage {
         guard let result else { throw CaptureFailure.message(L("无法访问保存文件夹。")) }
         return try result.get()
     }
-    static func writePNG(_ image: CGImage) throws -> URL {
+    static func writePNG(_ image: CGImage,recovery:URL = recoveryDirectory) throws -> URL {
         let rep = NSBitmapImageRep(cgImage: image)
         guard let data = rep.representation(using: .png, properties: [:]) else { throw CaptureFailure.message(L("无法编码截图。")) }
-        let url = try temporaryURL(ext: "png")
+        try FileManager.default.createDirectory(at:recovery,withIntermediateDirectories:true)
+        let url = recovery.appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
         try data.write(to: url, options: .atomic)
         return url
     }

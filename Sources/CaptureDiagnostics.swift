@@ -4,7 +4,7 @@ import os
 /// Privacy-safe rolling trace: fixed stage identifiers + numeric error classification only.
 /// No descriptions, paths, window titles, image data or clipboard values are accepted.
 enum CaptureDiagnostics {
-    enum Stage:String {case windowListBegin, windowListComplete, windowListFailed, mouseDown, mouseUp, buttonConfirm, doubleClickConfirm, cancel, captureBegin, captureComplete, clipboardOK, clipboardFailed, saveBegin, saveOK, saveFailed, captureFailed}
+    enum Stage:String {case windowListBegin, windowListComplete, windowListFailed, mouseDown, mouseUp, buttonConfirm, doubleClickConfirm, cancel, captureBegin, captureComplete, clipboardOK, clipboardFailed, saveBegin, saveOK, saveFailed, captureFailed, longShortcutUnavailable, longShortcutReady, longEnter, longEscape, longBaseline, longExtended, longNoOverlap, longFinished}
     private static let lock=NSLock()
     private static var entries:[String]=[]
     private static let logger=Logger(subsystem:"local.lightcapture",category:"capture-stage")

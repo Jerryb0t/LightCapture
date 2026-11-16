@@ -204,7 +204,7 @@
 
 "%@\n最后画面未确认收录，可仅保存已有部分。" = "%@\nThe last view was not confirmed. You can save the captured portion.";
 
-"框选后双指滚动；Enter 保存，Esc 取消" = "After selecting, scroll with two fingers; Enter saves, Esc cancels";
+"点击高亮窗口或拖框，松手后双指滚动；Enter 保存，Esc 取消" = "Click the highlighted window or drag to select, then scroll with two fingers. Enter saves; Esc cancels.";
 
 "无法启动长截图，请重试。" = "Cannot start scrolling capture. Please try again.";
 
@@ -215,3 +215,6 @@
 "最后画面未确认收录，请检查并保存已有部分。" = "The final frame could not be confirmed. Review and save the captured portion.";
 
 "无法排除长截图边框，请重新选择。" = "Cannot exclude the scrolling capture border. Please select again.";
+
+"没截到新内容：请重试，向下滚动再按 Enter。" = "No new content captured. Try again, scroll down, then press Enter.";
+"没找到重叠画面。请重试，滚动时保留部分上一屏。" = "No matching overlap. Try again and keep some of the previous view visible as you scroll.";

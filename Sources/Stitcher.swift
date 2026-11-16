@@ -52,6 +52,50 @@ enum ImageStitcher {
         }
     }
 
+    /// A snapped window can include fixed title/address bars or sticky edges.
+    /// Compare only contiguous stable text-bearing bands at the viewport edges;
+    /// the remaining moving rows must still satisfy the normal conservative stitch.
+    static func appendWindow(previous:CGImage,next:CGImage)throws->StitchResult {
+        guard previous.width==next.width,previous.height>=next.height,
+              next.width>=16,next.height>=32 else{throw StitchError.incompatibleSize}
+        let a=try Pixels(previous), b=try Pixels(next)
+        let limit=min(320,b.height/3)
+        func band(bottom:Bool)->Int {
+            var unchanged=0
+            for offset in 0..<limit {
+                let ay=bottom ? a.height-offset-1:offset,by=bottom ? b.height-offset-1:offset
+                guard difference(a,ay,b,by,1,rows:1,columns:64)<=0.4 else{break}
+                unchanged += 1
+            }
+            // A solid untextured page margin isn't evidence of fixed chrome.
+            let begin=bottom ? b.height-unchanged:0
+            return unchanged>=12 && unchanged<limit && texture(b,start:begin,height:unchanged)>=6 ? unchanged:0
+        }
+        let top=band(bottom:false),bottom=band(bottom:true)
+        guard top+bottom>0,b.height-top-bottom>=b.height/2,
+              let previousBody=previous.cropping(to:CGRect(x:0,y:top,width:a.width,height:a.height-top-bottom)),
+              let nextBody=next.cropping(to:CGRect(x:0,y:top,width:b.width,height:b.height-top-bottom)) else{
+            return try append(previous:previous,next:next)
+        }
+        let body:StitchResult
+        do{body=try append(previous:previousBody,next:nextBody)}
+        catch let error as StitchError {
+            if case .imageTooLarge=error{throw error}
+            // If this was only a similar content margin, retain the unmasked path.
+            return try append(previous:previous,next:next)
+        }
+        if body.addedRows==0{return StitchResult(image:previous,addedRows:0)}
+        let height=a.height+body.addedRows
+        guard height<=maximumDimension,a.width<=maximumPixels/height else{throw StitchError.imageTooLarge}
+        let stride=a.width*4
+        let bodyPixels=try Pixels(body.image)
+        var joined=a.rgba.prefix(top*stride).map{$0}
+        joined.reserveCapacity(height*stride)
+        joined.append(contentsOf:bodyPixels.rgba)
+        joined.append(contentsOf:b.rgba.suffix(bottom*stride))
+        return StitchResult(image:try makeImage(width:a.width,height:height,rgba:joined),addedRows:body.addedRows)
+    }
+
     static func append(previous: CGImage, next: CGImage) throws -> StitchResult {
         guard previous.width == next.width, next.width >= 16, next.height >= 32,
               previous.height >= next.height else { throw StitchError.incompatibleSize }
@@ -97,14 +141,15 @@ enum ImageStitcher {
         // Concatenate normalized row bytes directly, avoiding coordinate-system flips.
         var joined = a.rgba
         joined.append(contentsOf: b.rgba[(best.overlap * b.width * 4)...])
-        guard let provider = CGDataProvider(data: Data(joined) as CFData),
-              let image = CGImage(width: a.width, height: height, bitsPerComponent: 8,
-                bitsPerPixel: 32, bytesPerRow: a.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else {
-            throw StitchError.cannotDecode
-        }
-        return StitchResult(image: image, addedRows: added)
+        return StitchResult(image:try makeImage(width:a.width,height:height,rgba:joined),addedRows:added)
+    }
+    private static func makeImage(width:Int,height:Int,rgba:[UInt8])throws->CGImage {
+        guard let provider=CGDataProvider(data:Data(rgba) as CFData),
+              let image=CGImage(width:width,height:height,bitsPerComponent:8,
+                bitsPerPixel:32,bytesPerRow:width*4,space:CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+                provider:provider,decode:nil,shouldInterpolate:false,intent:.defaultIntent) else{throw StitchError.cannotDecode}
+        return image
     }
 
     /// KMP over bounded per-row sample hashes finds potential exact matches in O(H).
@@ -179,11 +224,11 @@ enum ImageStitcher {
         return Double(sum) / Double(ny * nx * 3)
     }
 
-    private static func texture(_ image: Pixels, height: Int) -> Double {
+    private static func texture(_ image: Pixels,start:Int=0,height: Int) -> Double {
         let ny = min(96, height), nx = min(48, image.width)
         var sum = 0.0, squares = 0.0
         for iy in 0..<ny {
-            let y = iy * (height - 1) / max(1, ny - 1)
+            let y = start+iy * (height - 1) / max(1, ny - 1)
             for ix in 0..<nx {
                 let x = ix * (image.width - 1) / max(1, nx - 1), p = (y * image.width + x) * 4
                 let value = (Double(image.rgba[p]) + Double(image.rgba[p + 1]) + Double(image.rgba[p + 2])) / 3

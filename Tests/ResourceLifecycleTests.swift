@@ -19,7 +19,7 @@ import AppKit
   precondition(releasedContent == nil)
   print("PASS control content and label released on dismissal")
   let selector=SelectionController();selector.cancel();selector.cancel()
-  precondition(!delegate.recorder.active && delegate.composite == nil && !delegate.longSampler.active && !delegate.longSampler.inFlight)
+  precondition(!delegate.recorder.active && delegate.longSession.composite == nil && !delegate.longSession.active && !delegate.longSession.draining)
   print("PASS inactive capture has no stream, composite, or sampling task; cancel idempotent")
  }
 }

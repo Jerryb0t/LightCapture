@@ -15,13 +15,16 @@ enum LongFrameProcessor {
         context.draw(image,in:CGRect(x:0,y:0,width:96,height:96))
         return Data(bytes:data,count:96*96*4)
     }
-    static func process(previous:CGImage,next:CGImage,lastSignature:Data?) throws -> LongFrameResult {
+    static func process(previous:CGImage,next:CGImage,lastSignature:Data?,allowFixedWindowBands:Bool=false) throws -> LongFrameResult {
         guard previous.width == next.width, next.height <= previous.height else {throw StitchError.incompatibleSize}
         let signature=try signature(next)
         if signature == lastSignature {return LongFrameResult(stitch:StitchResult(image:previous,addedRows:0),signature:signature)}
         // append also recognizes a viewport fully contained in older composite rows.
         // Returning its signature (even when addedRows == 0) keeps idle sampling cheap
         // while the user scrolls back, then forward to the already captured frontier.
-        return LongFrameResult(stitch:try ImageStitcher.append(previous:previous,next:next),signature:signature)
+        let stitched=allowFixedWindowBands
+            ? try ImageStitcher.appendWindow(previous:previous,next:next)
+            : try ImageStitcher.append(previous:previous,next:next)
+        return LongFrameResult(stitch:stitched,signature:signature)
     }
 }

@@ -10,6 +10,8 @@ struct CaptureTarget {
     var annotationRequested = false
     var mode:CaptureMode = .screenshot
     var frozenImage:CGImage? = nil
+    var sourcePID:pid_t? = nil
+    var snapWindowID:CGWindowID? = nil
 }
 
 @MainActor final class SelectionController {
@@ -33,22 +35,32 @@ struct CaptureTarget {
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.setMode(mode);view.setScreenshotAllowed(allowsScreenshot);view.frozenImage=frozen?.image;view.notice=notice
             let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
-            view.candidates = WindowSnapCandidates.make(order:windowOrder,
+            let candidates=WindowSnapCandidates.make(order:windowOrder,
                 fallback:WindowSnapCandidates.records(availableWindows),screen:screen.frame,
-                primaryHeight:primaryHeight,ownPID:ProcessInfo.processInfo.processIdentifier).map{rect,id in
-                    (rect,availableWindows.first{$0.windowID==id})
-                }
+                primaryHeight:primaryHeight,ownPID:ProcessInfo.processInfo.processIdentifier)
+            let windowOwners=WindowSnapCandidates.owners(order:windowOrder,windows:availableWindows)
+            view.candidates=candidates.map{rect,id in (rect,availableWindows.first{$0.windowID==id})}
             view.beforeLongStart = {[weak self] in self?.beforeLongStart?()}
             view.finished = { [weak self, weak view] rect, selectedWindow, annotate in
                 guard let self else { return }
                 if let rect {
-                    let converted = CGRect(x: rect.minX, y: screen.frame.height - rect.maxY, width: rect.width, height: rect.height)
                     let selectedMode=view?.selectedMode ?? .screenshot
+                    var converted = CGRect(x: rect.minX, y: screen.frame.height - rect.maxY, width: rect.width, height: rect.height)
+                    // Snap the live/frozen pair to the same whole-point edges so
+                    // their baseline sizes agree on Retina displays.
+                    if selectedMode == .longScreenshot {
+                        converted=converted.integral.intersection(CGRect(origin:.zero,size:screen.frame.size))
+                    }
                     let cropped:CGImage?
-                    do{cropped=selectedMode == .screenshot ? try frozen?.crop(converted) : nil}
+                    do{cropped=selectedMode == .screenshot || selectedMode == .longScreenshot ? try frozen?.crop(converted) : nil}
                     catch{let failure=self.failure;self.cancel(notify:false);failure?(error);return}
+                    let snapWindowID=view?.pendingWasSnap == true
+                        ? selectedWindow?.windowID ?? candidates.first(where:{$0.0==rect})?.1
+                        : nil
+                    let sourcePID=selectedWindow?.owningApplication?.processID
+                        ?? snapWindowID.flatMap{windowOwners[$0]}
                     let cb = self.completion; self.cancel(notify: false)
-                    cb?(CaptureTarget(display: display, rect: converted, window: selectedWindow, annotationRequested: annotate, mode:selectedMode,frozenImage:cropped))
+                    cb?(CaptureTarget(display: display, rect: converted, window: selectedWindow, annotationRequested: annotate, mode:selectedMode,frozenImage:cropped,sourcePID:sourcePID,snapWindowID:snapWindowID))
                 } else { self.cancel(notify: true) }
             }
             view.hovered = view.candidates.first(where:{$0.0.contains(CGPoint(x:NSEvent.mouseLocation.x-screen.frame.minX,y:NSEvent.mouseLocation.y-screen.frame.minY))})
@@ -101,6 +113,7 @@ final class SelectionView: NSView {
     var hovered: (CGRect,SCWindow?)?
     private(set) var pendingRect: CGRect?
     private var pendingWindow: SCWindow?
+    private(set) var pendingWasSnap=false
     private var completed = false
     private let toolbar = NSVisualEffectView()
     private let modePicker = NSPopUpButton()
@@ -195,7 +208,7 @@ final class SelectionView: NSView {
             NSColor.systemCyan.setStroke(); let p = NSBezierPath(rect:r); p.lineWidth=2; p.stroke()
         }
         let text = pendingRect == nil ? L("拖动选区 · 双击已选区域确认 · Esc 取消") : ""
-        if selectedMode == .longScreenshot {L("框选后双指滚动；Enter 保存，Esc 取消").draw(at:CGPoint(x:24,y:bounds.height-82),withAttributes:[.font:NSFont.systemFont(ofSize:13),.foregroundColor:NSColor.white])}
+        if selectedMode == .longScreenshot {L("点击高亮窗口或拖框，松手后双指滚动；Enter 保存，Esc 取消").draw(at:CGPoint(x:24,y:bounds.height-82),withAttributes:[.font:NSFont.systemFont(ofSize:13),.foregroundColor:NSColor.white])}
         if let notice {notice.draw(at:CGPoint(x:24,y:bounds.height-62),withAttributes:[.font:NSFont.systemFont(ofSize:11),.foregroundColor:NSColor.white])}
         text.draw(at: CGPoint(x:24,y:bounds.height-40), withAttributes: [.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:NSColor.white])
     }
@@ -210,8 +223,8 @@ final class SelectionView: NSView {
         guard !completed else{return}
         CaptureDiagnostics.record(.mouseUp)
         current=convert(event.locationInWindow,from:nil)
-        if let r=selected,r.width>=20,r.height>=20 {pendingRect=r;pendingWindow=nil}
-        else if pendingRect == nil,let origin=start,let end=current,hypot(origin.x-end.x,origin.y-end.y)<=4,let hovered {pendingRect=hovered.0;pendingWindow=hovered.1}
+        if let r=selected,r.width>=20,r.height>=20 {pendingRect=r;pendingWindow=nil;pendingWasSnap=false}
+        else if pendingRect == nil,let origin=start,let end=current,hypot(origin.x-end.x,origin.y-end.y)<=4,let hovered {pendingRect=hovered.0;pendingWindow=hovered.1;pendingWasSnap=true}
         start=nil;current=nil;confirmButton.isEnabled = pendingRect != nil;updateMode();layout();needsDisplay=true
     }
     override func keyDown(with event:NSEvent) {
