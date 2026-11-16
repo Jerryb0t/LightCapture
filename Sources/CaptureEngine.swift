@@ -40,15 +40,16 @@ import AVFoundation
         return config
     }
     static func filter(target: CaptureTarget, content: SCShareableContent, recording:Bool = false) throws -> SCContentFilter {
-        if !recording, let window = target.window {
+        if !recording, target.mode != .longScreenshot, let window = target.window {
             guard let current = content.windows.first(where:{$0.windowID == window.windowID}) else {throw CaptureFailure.message(L("目标窗口已关闭，请重新选择。"))};return SCContentFilter(desktopIndependentWindow:current)
         }
         let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+        if target.mode == .longScreenshot && own.isEmpty {throw CaptureFailure.message(L("无法排除长截图边框，请重新选择。"))}
         // Application exclusion also covers controls created after this snapshot.
         return SCContentFilter(display: target.display, excludingApplications: own, exceptingWindows: [])
     }
     static func screenshot(target: CaptureTarget) async throws -> CGImage {
-        let content = try await content()
+        let content = target.mode == .longScreenshot ? try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:false) : try await content()
         guard content.displays.contains(where: {$0.displayID == target.display.displayID}) else { throw CaptureFailure.message(L("屏幕已断开，请重新选择区域。")) }
         let filter = try filter(target:target,content:content)
         let config = configuration(target:target,recording:false)

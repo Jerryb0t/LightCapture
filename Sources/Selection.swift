@@ -14,6 +14,7 @@ struct CaptureTarget {
 
 @MainActor final class SelectionController {
     var failure:((Error)->Void)?
+    var beforeLongStart:(()->String?)?
     private var windows: [NSWindow] = []
     private var completion: ((CaptureTarget?) -> Void)?
     func begin(displays: [SCDisplay], availableWindows: [SCWindow] = [], mode:CaptureMode = .screenshot, frames:[CGDirectDisplayID:FrozenFrame] = [:], windowOrder:[[String:Any]] = [], notice:String? = nil, allowsScreenshot:Bool = true, completion: @escaping (CaptureTarget?) -> Void) {
@@ -37,6 +38,7 @@ struct CaptureTarget {
                 primaryHeight:primaryHeight,ownPID:ProcessInfo.processInfo.processIdentifier).map{rect,id in
                     (rect,availableWindows.first{$0.windowID==id})
                 }
+            view.beforeLongStart = {[weak self] in self?.beforeLongStart?()}
             view.finished = { [weak self, weak view] rect, selectedWindow, annotate in
                 guard let self else { return }
                 if let rect {
@@ -93,6 +95,7 @@ final class SelectionWindow: NSWindow {
 final class SelectionView: NSView {
     var frozenImage:CGImage?
     var notice:String?
+    var beforeLongStart:(()->String?)?
     var finished: ((CGRect?, SCWindow?, Bool) -> Void)?
     var candidates: [(CGRect,SCWindow?)] = []
     var hovered: (CGRect,SCWindow?)?
@@ -148,6 +151,7 @@ final class SelectionView: NSView {
     override func acceptsFirstMouse(for event:NSEvent?)->Bool {true}
     @objc func confirmSelection(){
         guard !completed,let rect=pendingRect else{return}
+        if selectedMode == .longScreenshot,let error=beforeLongStart?(){notice=error;needsDisplay=true;return}
         CaptureDiagnostics.record(.buttonConfirm)
         completed=true;frozenImage=nil;finished?(rect,pendingWindow,false)
     }
@@ -191,6 +195,7 @@ final class SelectionView: NSView {
             NSColor.systemCyan.setStroke(); let p = NSBezierPath(rect:r); p.lineWidth=2; p.stroke()
         }
         let text = pendingRect == nil ? L("拖动选区 · 双击已选区域确认 · Esc 取消") : ""
+        if selectedMode == .longScreenshot {L("框选后双指滚动；Enter 保存，Esc 取消").draw(at:CGPoint(x:24,y:bounds.height-82),withAttributes:[.font:NSFont.systemFont(ofSize:13),.foregroundColor:NSColor.white])}
         if let notice {notice.draw(at:CGPoint(x:24,y:bounds.height-62),withAttributes:[.font:NSFont.systemFont(ofSize:11),.foregroundColor:NSColor.white])}
         text.draw(at: CGPoint(x:24,y:bounds.height-40), withAttributes: [.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:NSColor.white])
     }

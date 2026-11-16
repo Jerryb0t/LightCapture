@@ -41,6 +41,7 @@ import AVFoundation
     var longTarget: CaptureTarget?
     var captureSourceApplication:NSRunningApplication?
     let longKeys=LongSessionKeyboard()
+    let longBorder=LongCaptureBorder()
     let longRequest=DeadlineRequest<CGImage>()
     let longFinishRequest=DeadlineRequest<LongFrameResult>()
     var longPartialSaveButton:NSButton?
@@ -313,9 +314,15 @@ import AVFoundation
                 self.authorLinks.dismiss();self.feedbackDismiss?.cancel();self.feedbackDismiss=nil;self.feedbackPanel?.close();self.feedbackPanel=nil
                 CaptureDiagnostics.record(.windowListComplete);self.window.orderOut(nil)
                 if region {
+                    self.selector.beforeLongStart = {[weak self] in
+                        guard let self else{return L("无法启动长截图，请重试。")}
+                        guard !self.longSampler.inFlight else{return L("上次屏幕请求尚未结束，请退出后重开轻截。")}
+                        self.longKeys.action={[weak self] finish in if finish{self?.finishLong()}else{self?.cancelLong()}}
+                        return self.longKeys.start() ? nil : L("Enter 或 Esc 已被占用，未开始长截图。请换用普通截图或取消。")
+                    }
                     self.selector.begin(displays:content.displays,availableWindows:windowSnap ? content.windows : [],mode:mode,frames:prepared.frames,windowOrder:windowSnap ? prepared.order : [],notice:prepared.notice,allowsScreenshot:prepared.screenshotAvailable){[weak self] target in
                         guard let self else{return}
-                        if let target{then(target)}else{self.setBusy(false);self.status.stringValue=L("已取消。");if restoreLaunchWindow && !self.visibility.background{self.showWindow()}}
+                        if let target{then(target)}else{self.longKeys.stop();self.setBusy(false);self.status.stringValue=L("已取消。");if restoreLaunchWindow && !self.visibility.background{self.showWindow()}}
                     }
                 }else{
                     let screen=NSScreen.screens.first{$0.frame.contains(NSEvent.mouseLocation)} ?? NSScreen.main
@@ -387,12 +394,14 @@ import AVFoundation
     @objc func longScreenshot(){prepare(region:true,mode:.longScreenshot){[weak self] target in self?.takeScreenshot(target)}}
     func beginLong(_ target:CaptureTarget){
         guard !longSampler.inFlight else{setBusy(false);showFeedback(L("上一帧仍在等待系统响应，请稍后重试。"),failure:true);return}
+        var target=target;target.window=nil
         longGeneration=UUID();longFinishing=false;longTarget=target
         longKeys.action={[weak self] finish in if finish{self?.finishLong()}else{self?.cancelLong()}}
-        _=longKeys.start()
+        guard longKeys.active else{setBusy(false);report(CaptureFailure.message(L("无法启动长截图，请重试。")));return}
         selector.cancel(notify:false)
         window.orderOut(nil);NSApp.deactivate()
         captureSourceApplication?.activate(options:[])
+        showLongBorder()
         longRequest.start(seconds:8,operation:{
             try await Task.sleep(nanoseconds:200_000_000)
             return try await CaptureEngine.screenshot(target:target)
@@ -406,26 +415,16 @@ import AVFoundation
             }
         }
     }
+    func showLongBorder(){
+        guard let target=longTarget,let screen=NSScreen.screens.first(where:{($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value==target.display.displayID}) else{return}
+        let rect=RecordingControlPlacement.globalCapture(localTopLeft:target.rect,screen:screen.frame)
+        longBorder.show(capture:rect,screen:screen.frame)
+    }
     func showLongControls(){
-        let panel=NSPanel(contentRect:NSRect(x:0,y:0,width:440,height:190),styleMask:[.titled,.nonactivatingPanel],backing:.buffered,defer:false);panel.title=L("长截图 · 滚动自动拼接");panel.level = .floating;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];panel.isReleasedWhenClosed=false
-        let stack=NSStackView();stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=10;stack.frame=NSRect(x:16,y:12,width:408,height:160)
-        let label=NSTextField(wrappingLabelWithString:L("在原页面缓慢向下滚动，停稳后自动拼接。\nEnter 完成保存 · Esc 取消；选区不拦截滚动。"));label.font = .systemFont(ofSize:12);stack.addArrangedSubview(label);longLabel=label
-        let row=NSStackView(views:[NSButton(title:L("接下一屏"),target:self,action:#selector(appendLong)),NSButton(title:L("完成并保存 ↩"),target:self,action:#selector(finishLong)),NSButton(title:L("取消"),target:self,action:#selector(cancelLong))]);row.spacing=8;stack.addArrangedSubview(row)
-        let partial=NSButton(title:L("仅保存已有部分"),target:self,action:#selector(saveLongPartial));partial.isHidden=true;stack.addArrangedSubview(partial);longPartialSaveButton=partial
-        panel.contentView!.addSubview(stack)
-        if let target=longTarget,let index=NSScreen.screens.firstIndex(where:{($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value==target.display.displayID}) {
-            let screen=NSScreen.screens[index]
-            let capture=RecordingControlPlacement.globalCapture(localTopLeft:target.rect,screen:screen.frame)
-            if let frame=RecordingControlPlacement.frame(size:panel.frame.size,capture:capture,visibleScreens:NSScreen.screens.map(\.visibleFrame),recordedScreenIndex:index){panel.setFrameOrigin(frame.origin)}
-            else{panel.setFrameOrigin(CGPoint(x:screen.visibleFrame.minX+12,y:screen.visibleFrame.maxY-panel.frame.height-12))}
-        }
-        longKeys.action={[weak self] finish in if finish{self?.finishLong()}else{self?.cancelLong()}}
-        let shortcuts=longKeys.active || longKeys.start()
-        if !shortcuts {panel.ignoresMouseEvents=false;label.stringValue=L("快捷键暂不可用，请使用完成或取消按钮；在控件之外滚动页面。")}
-        panel.orderFrontRegardless();control=panel
         startLongSampling()
     }
     func dismissControls(){
+        longBorder.close()
         control?.orderOut(nil);control?.contentView=nil;control?.close();control=nil;longLabel=nil;longPartialSaveButton=nil
     }
     let longSampler = SessionSampler<LongFrameResult>()
@@ -449,8 +448,8 @@ import AVFoundation
             if error is SessionSampler<LongFrameResult>.SamplingFailure {self?.longSampler.stop();self?.showLongFailure(error);return}
             self?.longLabel?.stringValue=L("%@\n请慢一点滚动并保持重叠；也可点「接下一屏」。", String(describing: error.localizedDescription))
             if let stitch=error as? StitchError {
-                if case .imageTooLarge=stitch {self?.longSampler.stop()}
-            } else {self?.longSampler.stop()}
+                if case .imageTooLarge=stitch {self?.showLongFailure(error)}
+            } else {self?.showLongFailure(error)}
         })
     }
     @objc func appendLong(){guard !longFinishing else{return};longSampler.sample()}
@@ -472,13 +471,16 @@ import AVFoundation
             case .success(let frame):
                 self.longKeys.stop();self.dismissControls();self.composite=nil;self.lastLongSignature=nil;self.longTarget=nil
                 self.saveImage(frame.stitch.image,category:"长截图")
-            case .failure(let error):self.showLongFailure(error);if !self.longSampler.inFlight{self.startLongSampling()}
+            case .failure(let error):self.showLongFailure(error)
             }
         }
     }
     func showLongFailure(_ error:Error){
-        longLabel?.stringValue=L("%@\n最后画面未确认收录，可仅保存已有部分。",error.localizedDescription)
-        longPartialSaveButton?.isHidden=false
+        let partial=composite
+        longGeneration=UUID();longRequest.cancel();longFinishRequest.cancel();longKeys.stop();longSampler.stop();longFinishing=false
+        dismissControls();composite=nil;lastLongSignature=nil;longTarget=nil
+        if let partial {showEditor(partial,category:"长截图");showFeedback(L("最后画面未确认收录，请检查并保存已有部分。"),failure:true)}
+        else {setBusy(false);report(error)}
     }
     @objc func saveLongPartial(){
         guard let image=composite else{return}

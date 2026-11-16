@@ -203,3 +203,15 @@
 "仅保存已有部分" = "Save Captured Portion";
 
 "%@\n最后画面未确认收录，可仅保存已有部分。" = "%@\nThe last view was not confirmed. You can save the captured portion.";
+
+"框选后双指滚动；Enter 保存，Esc 取消" = "After selecting, scroll with two fingers; Enter saves, Esc cancels";
+
+"无法启动长截图，请重试。" = "Cannot start scrolling capture. Please try again.";
+
+"上次屏幕请求尚未结束，请退出后重开轻截。" = "The previous screen request has not ended. Quit and reopen LightCapture.";
+
+"Enter 或 Esc 已被占用，未开始长截图。请换用普通截图或取消。" = "Enter or Esc is unavailable. Scrolling capture did not start. Choose a screenshot or cancel.";
+
+"最后画面未确认收录，请检查并保存已有部分。" = "The final frame could not be confirmed. Review and save the captured portion.";
+
+"无法排除长截图边框，请重新选择。" = "Cannot exclude the scrolling capture border. Please select again.";

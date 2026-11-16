@@ -6,7 +6,7 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 [简体中文](README.md)
 
-**Current source: 0.2.4 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
+**Current source: 0.2.5 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
 
 **0.2.3 idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
 
@@ -14,8 +14,8 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 - Press **Control+A** to select a region or snap to a window. The selection toolbar switches between screenshots, scrolling capture, and recording. **Enter** copies and saves a screenshot by default; settings can make it copy-only.
 - Annotate screenshots with a pen, arrow, rectangle, or text. Full-screen screenshots are also available.
-- Scrolling capture starts after selecting its mode and region. Scroll slowly in the original page; Enter finishes and saves, Escape cancels. Clickable finish/cancel and manual append remain available. Revisiting already captured content does not extend the image again. No injected scrolling or Accessibility permission is required. With no free space, a small control panel occupies a corner; scroll outside it. A visible warning appears if temporary shortcuts cannot register. Fixed headers, animation, periodic patterns, and complex pages may not stitch reliably.
-- Finishing samples one final frame. On a capture timeout, explicitly save the already captured portion if needed. If the system request never returns, restart the app rather than stacking capture tasks.
+- Scrolling capture starts after selecting its mode and region. Scroll slowly in the original page with two fingers; Enter finishes and saves, Escape cancels. During capture, only an input-transparent, nonactivating thin border remains, with no floating control window. If Enter/Escape cannot register, the selection stays visible with an explanation and capture does not begin. Revisiting captured content does not extend the image again. No injected scrolling or Accessibility permission is required. Fixed headers, animation, periodic patterns, and complex pages may not stitch reliably.
+- Finishing samples one final frame. On a capture timeout, sampling ends and the editor retains the captured portion for review and explicit saving. If the system request never returns, restart the app rather than stacking capture tasks.
 - Record a full display or a region. Select resolution and a target frame rate independently: 24, 30 (default), or 60 fps. The target is a maximum, not guaranteed; output depends on display refresh, motion, and hardware.
 - Choose system audio and microphone separately. On a fresh configuration, system audio is on and the microphone is off. Existing choices are preserved. The app asks for microphone permission only when you start a recording with it enabled. When both inputs are enabled, it mixes them into one playback track without re-encoding video.
 - Press the same shortcut to stop and save. The control panel stays outside the recording area when possible and hides when there is no room.
