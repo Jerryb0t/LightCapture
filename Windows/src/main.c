@@ -15,6 +15,7 @@
 #include <string.h>
 #include <wchar.h>
 #include "lightcapture_video.h"
+#include "long_outline.h"
 extern void lc_show_support(HWND owner,BOOL zh);
 extern void lc_hide_support(void);
 
@@ -419,6 +420,15 @@ static void draw_overlay(HWND w){
             if(i<4&&tool==(int)i+1)paint_fill(dc,actions[i],RGB(48,88,120));
             RECT area=actions[i];
             DrawTextW(dc,tr(labels[i][0],labels[i][1]),-1,&area,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+        }
+        const int n=37;
+        RECT hint={toolbar.left,toolbar.bottom+4,toolbar.right,toolbar.bottom+4+n};
+        if(hint.bottom>frozen.height){hint.bottom=toolbar.top-4;hint.top=hint.bottom-n;}
+        if(hint.top>=0){
+            paint_fill(dc,hint,RGB(28,34,43));
+            DrawTextW(dc,tr(L"长截图：点长截图或按 L。滚动原页面；Enter 保存，Esc 取消。",
+                L"Long: click Long or press L. Scroll · Enter save · Esc cancel"),
+                -1,&hint,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
         }
     }else if(!selecting){
         WCHAR const *hint=tr(L"点击窗口或拖动选区 · Enter 确认 · Esc 取消 · F 全屏",L"Click or drag · Enter confirm · Esc cancel · F full display");
@@ -843,11 +853,10 @@ shutdown:
 static void *longStitch;
 static Image longFrame;
 static RECT longRegion;
-static HWND longStatus;
-static BOOL longExcluded;
-static BOOL longEnterHotkey,longEscHotkey,longAtLimit;
-static int lastLongResult;
+static HWND longOutline[4];
+static BOOL longEnterHotkey,longEscHotkey,longAtLimit,longSaving,longSawUnmatchedFrame;
 static const WCHAR longClass[]=L"LightCaptureWindows.LongControl.v1";
+static const WCHAR longOutlineClass[]=L"LightCaptureWindows.LongOutline.v1";
 extern void *lc_stitch_new(void);
 extern void lc_stitch_free(void *);
 extern int lc_stitch_add(void *,const uint8_t *,int,int);
@@ -866,83 +875,132 @@ static BOOL acquire_live(Image *d,RECT region){
     GdiFlush();
     return ok;
 }
-static BOOL long_sample(BOOL manual){
+static BOOL long_sample(void){
     if(!longStitch||!longFrame.bitmap)return FALSE;
-    // Win10 2004+ exclusion avoids the control window in live capture. If it isn't
-    // supported, the only visible control is positioned outside the chosen region.
+    // Borders are wholly outside the crop, even if the OS cannot exclude them.
     if(!acquire_live(&longFrame,longRegion))return FALSE;
     int result=lc_stitch_add(longStitch,(const uint8_t*)longFrame.pixels,longFrame.width,longFrame.height);
-    int w=0,h=0;
-    lc_stitch_view(longStitch,&w,&h);
-    if(!longStatus)return result>=0&&result<=3;
-    WCHAR line[180];
-    if(result==5)SetWindowTextW(longStatus,tr(L"达到长截图上限，请保存。",L"Capture limit reached; save the image."));
-    else if(result==3&&(manual||lastLongResult!=3))SetWindowTextW(longStatus,tr(L"无法匹配，往回滚一点，再慢慢向下滚。",L"Overlap not found; scroll back, then down slowly."));
-    else if(result==0||result==1){
-        StringCchPrintfW(line,180,tr(L"已拼接 %d 像素高 · 继续向下滚动",L"%d px tall · continue scrolling down"),h);
-        SetWindowTextW(longStatus,line);
-    }
-    if(result!=2) lastLongResult=result;
+    if(result==3)longSawUnmatchedFrame=TRUE;
     if(result==5){longAtLimit=TRUE;KillTimer(longControl,LONG_TIMER);}
     return result>=0&&result<=3;
 }
+static void unbind_long_keys(HWND w){
+    if(longEnterHotkey)UnregisterHotKey(w,LONG_SAVE_HOTKEY);
+    if(longEscHotkey)UnregisterHotKey(w,LONG_CANCEL_HOTKEY);
+    longEnterHotkey=longEscHotkey=FALSE;
+}
+static BOOL bind_long_keys(HWND w){
+    longEnterHotkey=RegisterHotKey(w,LONG_SAVE_HOTKEY,MOD_NOREPEAT,VK_RETURN);
+    longEscHotkey=RegisterHotKey(w,LONG_CANCEL_HOTKEY,MOD_NOREPEAT,VK_ESCAPE);
+    return longEnterHotkey&&longEscHotkey;
+}
 static void clear_long(void){
+    for(unsigned i=0;i<4;i++){
+        if(IsWindow(longOutline[i]))DestroyWindow(longOutline[i]);
+        longOutline[i]=NULL;
+    }
     if(longStitch)lc_stitch_free(longStitch);
-    longStitch=NULL;longStatus=NULL;lastLongResult=0;longExcluded=FALSE;longAtLimit=FALSE;
+    longStitch=NULL;longAtLimit=longSaving=longSawUnmatchedFrame=FALSE;
     image_free(&longFrame);
 }
 static void finish_long(BOOL save){
-    if(!IsWindow(longControl))return;
-    BOOL ok=TRUE;
+    if(!IsWindow(longControl)||longSaving)return;
+    BOOL ok=TRUE,savedSingleWithUnmatched=FALSE;
     if(save){
         // Include the last visible position even if Enter beat the sampler.
-        if(!longAtLimit)long_sample(TRUE);
+        if(!longAtLimit)long_sample();
         Image out={0};
         out.pixels=(void*)lc_stitch_view(longStitch,&out.width,&out.height);
         WCHAR path[MAX_PATH]={0};
         ok=out.pixels&&output_named(path,MAX_PATH,FALSE,L"Long Screenshots",L"png")&&write_png_atomic(&out,path);
         if(!ok){
+            // Don't consume the dialog's keyboard or sample it into a screenshot.
+            longSaving=TRUE;
+            KillTimer(longControl,LONG_TIMER);
+            unbind_long_keys(longControl);
             error_text(tr(L"长截图保存失败。可更改目录后重试，当前内容不会丢失。",L"Could not save long screenshot. Change the folder and retry; capture retained."));
+            longSaving=FALSE;
+            if(!bind_long_keys(longControl)){
+                DestroyWindow(longControl);
+                error_text(tr(L"回车或 Esc 无法重新注册，已退出长截图。",L"Enter or Esc became unavailable, so long capture ended."));
+            }else longAtLimit=TRUE; // Retain the already captured image unchanged for retry.
             return;
         }
+        savedSingleWithUnmatched=longSawUnmatchedFrame&&out.height==longFrame.height;
     }
     DestroyWindow(longControl);
+    if(savedSingleWithUnmatched)
+        error_text(tr(L"没有找到可拼接的重叠内容，仅保存了第一屏。可以重新框选，放慢向下滚动。",
+            L"No matching overlap was found. Only the first screen was saved. Try again and scroll down more slowly."));
 }
 static LRESULT CALLBACK long_proc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     switch(m){
-    case WM_CREATE:
-        longStatus=control(w,L"STATIC",tr(L"用触控板或滚轮滚动原页面。",L"Scroll the original page with trackpad or wheel."),0,9,9,340,24,0);
-        control(w,L"BUTTON",tr(L"手动接一屏",L"Next screen"),BS_PUSHBUTTON,9,39,105,27,101);
-        control(w,L"BUTTON",tr(L"保存",L"Save"),BS_PUSHBUTTON,120,39,90,27,102);
-        control(w,L"BUTTON",tr(L"取消",L"Cancel"),BS_PUSHBUTTON,216,39,90,27,103);
-        return 0;
-    case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
     case WM_HOTKEY:
         if(wp==LONG_SAVE_HOTKEY&&longEnterHotkey)finish_long(TRUE);
         else if(wp==LONG_CANCEL_HOTKEY&&longEscHotkey)finish_long(FALSE);
         return 0;
-    case WM_COMMAND:
-        if(LOWORD(wp)==101)long_sample(TRUE);
-        else if(LOWORD(wp)==102)finish_long(TRUE);
-        else if(LOWORD(wp)==103)finish_long(FALSE);
-        return 0;
     case WM_TIMER:
-        if(wp==LONG_TIMER)long_sample(FALSE);
+        if(wp==LONG_TIMER)long_sample();
         return 0;
     case WM_CLOSE:finish_long(FALSE);return 0;
     case WM_DESTROY:
         KillTimer(w,LONG_TIMER);
-        if(longEnterHotkey)UnregisterHotKey(w,LONG_SAVE_HOTKEY);
-        if(longEscHotkey)UnregisterHotKey(w,LONG_CANCEL_HOTKEY);
-        longEnterHotkey=longEscHotkey=FALSE;
+        unbind_long_keys(w);
         longControl=NULL;clear_long();return 0;
     }
     return DefWindowProcW(w,m,wp,lp);
+}
+static LRESULT CALLBACK long_outline_proc(HWND w,UINT m,WPARAM wp,LPARAM lp){
+    if(m==WM_NCHITTEST)return HTTRANSPARENT;
+    if(m==WM_MOUSEACTIVATE)return MA_NOACTIVATE;
+    if(m==WM_ERASEBKGND)return 1;
+    if(m==WM_PAINT){
+        PAINTSTRUCT ps;HDC dc=BeginPaint(w,&ps);
+        paint_fill(dc,ps.rcPaint,accent);
+        EndPaint(w,&ps);return 0;
+    }
+    return DefWindowProcW(w,m,wp,lp);
+}
+static void show_long_outline(RECT r,RECT desktop){
+    LcOutlineRect strips[4];
+    unsigned count=lc_outline_strips((LcOutlineRect){r.left,r.top,r.right,r.bottom},
+        (LcOutlineRect){desktop.left,desktop.top,desktop.right,desktop.bottom},strips);
+    WNDCLASSEXW cls={.cbSize=sizeof cls,.lpfnWndProc=long_outline_proc,.hInstance=instance,.lpszClassName=longOutlineClass};
+    if(!RegisterClassExW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return;
+    for(unsigned i=0;i<count;i++){
+        LcOutlineRect a=strips[i];
+        HWND w=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST,
+             longOutlineClass,NULL,WS_POPUP,a.left,a.top,a.right-a.left,a.bottom-a.top,NULL,NULL,instance,NULL);
+        if(!w)continue;
+        if(!SetLayeredWindowAttributes(w,0,255,LWA_ALPHA)){DestroyWindow(w);continue;}
+        longOutline[i]=w;
+        SetWindowDisplayAffinity(w,WDA_EXCLUDEFROMCAPTURE);
+        ShowWindow(w,SW_SHOWNOACTIVATE);
+    }
 }
 static void start_long(RECT r){
     if(width(r)<80||height(r)<100){
         error_text(tr(L"请至少选择 80 × 100 像素的内容区域。",L"Select a region of at least 80 × 100 pixels."));return;
     }
+    WNDCLASSEXW c={.cbSize=sizeof(c),.lpfnWndProc=long_proc,.hInstance=instance,.lpszClassName=longClass};
+    if(!RegisterClassExW(&c)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS){
+        error_text(tr(L"无法启动长截图。",L"Could not start long capture."));return;
+    }
+    longControl=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,longClass,NULL,
+      WS_POPUP,0,0,0,0,NULL,NULL,instance,NULL);
+    if(!longControl||!bind_long_keys(longControl)||!SetTimer(longControl,LONG_TIMER,LONG_SAMPLE_MS,NULL)){
+        if(IsWindow(longControl))DestroyWindow(longControl);
+        error_text(tr(L"无法启用长截图按键。请关闭占用 Enter 或 Esc 的工具后重试。",
+            L"Could not reserve the capture controls. Free Enter and Esc, then retry."));
+        return;
+    }
+    // The controller is hidden for the entire session; only the crop outline is visible.
+    longRegion=r;
+    longStitch=lc_stitch_new();
+    if(!longStitch||!image_allocate(&longFrame,width(r),height(r))){
+        DestroyWindow(longControl);error_text(tr(L"无法开始长截图。",L"Could not start the long screenshot."));return;
+    }
+    RECT desktop=virtualScreen;
     // Leave the real page uncovered and give it back native focus. We don't
     // forward wheel events: precision touchpad gestures go through Windows to
     // the actual underlying application, just like when LightCapture is idle.
@@ -954,51 +1012,10 @@ static void start_long(RECT r){
     if(IsWindow(target)&&target!=mainWindow&&target!=GetDesktopWindow()&&target!=GetShellWindow()&&!IsIconic(target))
         SetForegroundWindow(target);
     DwmFlush();
-    longRegion=r;
-    longStitch=lc_stitch_new();
-    if(!longStitch||!image_allocate(&longFrame,width(r),height(r))||!long_sample(TRUE)){
-        clear_long();error_text(tr(L"无法开始长截图。",L"Could not start the long screenshot."));return;
+    if(!long_sample()){
+        DestroyWindow(longControl);error_text(tr(L"无法开始长截图。",L"Could not start the long screenshot."));return;
     }
-    WNDCLASSEXW c={.cbSize=sizeof(c),.lpfnWndProc=long_proc,.hInstance=instance,
-      .hCursor=LoadCursor(NULL,IDC_ARROW),.hbrBackground=(HBRUSH)(COLOR_WINDOW+1),.lpszClassName=longClass};
-    if(!RegisterClassExW(&c)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS){
-        clear_long();error_text(tr(L"无法打开拼接控件。",L"Could not open the stitching controls."));return;
-    }
-    MONITORINFO mi={.cbSize=sizeof mi};
-    GetMonitorInfoW(MonitorFromRect(&r,MONITOR_DEFAULTTONEAREST),&mi);
-    int w=MulDiv(356,GetDpiForSystem(),96),h=MulDiv(108,GetDpiForSystem(),96);
-    RECT area=mi.rcWork;
-    POINT positions[]={{r.right+6,r.top},{r.left-w-6,r.top},{r.left,r.bottom+6},{r.left,r.top-h-6}};
-    RECT hit;
-    int xpos=area.right-w,ypos=area.top;
-    BOOL outside=FALSE;
-    for(unsigned i=0;i<sizeof positions/sizeof positions[0];i++){
-        int x=max(area.left,min(positions[i].x,area.right-w));
-        int y=max(area.top,min(positions[i].y,area.bottom-h));
-        if(!IntersectRect(&hit,&r,&(RECT){x,y,x+w,y+h})){xpos=x;ypos=y;outside=TRUE;break;}
-    }
-    longControl=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST|WS_EX_NOACTIVATE,longClass,
-      tr(L"轻截 · 长截图",L"LightCapture · Long screenshot"),WS_CAPTION|WS_SYSMENU|WS_POPUP,
-      xpos,ypos,w,h,NULL,NULL,instance,NULL);
-    if(!longControl){
-        clear_long();error_text(tr(L"无法打开拼接控件。",L"Could not open the stitching controls."));return;
-    }
-    // Unmodified keys are reserved only during this user-initiated session.
-    // A different app can already own one; its native registration is respected,
-    // with the floating buttons still usable and F2 (or the set key) still saving.
-    longEnterHotkey=RegisterHotKey(longControl,LONG_SAVE_HOTKEY,MOD_NOREPEAT,VK_RETURN);
-    longEscHotkey=RegisterHotKey(longControl,LONG_CANCEL_HOTKEY,MOD_NOREPEAT,VK_ESCAPE);
-    if(longEnterHotkey)SetWindowTextW(GetDlgItem(longControl,102),tr(L"保存 · Enter",L"Save · Enter"));
-    if(longEscHotkey)SetWindowTextW(GetDlgItem(longControl,103),tr(L"取消 · Esc",L"Cancel · Esc"));
-    longExcluded=SetWindowDisplayAffinity(longControl,WDA_EXCLUDEFROMCAPTURE);
-    if(outside||longExcluded)ShowWindow(longControl,SW_SHOWNOACTIVATE);
-    else if(!longEnterHotkey||!longEscHotkey){
-        finish_long(FALSE);
-        error_text(tr(L"找不到控件位置，且回车或 Esc 被占用。请框选稍小的区域。",
-            L"No space for capture controls and Enter or Esc is already taken. Select a smaller area."));
-        return;
-    }
-    SetTimer(longControl,LONG_TIMER,LONG_SAMPLE_MS,NULL);
+    show_long_outline(r,desktop);
 }
 
 static const WCHAR recordClass[]=L"LightCaptureWindows.RecordingControl.v1";

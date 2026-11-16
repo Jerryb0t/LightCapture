@@ -4,6 +4,7 @@
 #endif
 // SPDX-License-Identifier: MIT
 #include "lightcapture_stitch.hpp"
+#include "long_outline.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -57,6 +58,24 @@ static void check_document(const VerticalStitch& stitch, int top = 0, int bottom
 }
 
 int main() {
+    {
+        LcOutlineRect edges[4];
+        const LcOutlineRect desktop{-1600,-200,1920,1080};
+        auto check = [&](LcOutlineRect crop,unsigned count) {
+            assert(lc_outline_strips(crop, desktop, edges) == count);
+            for(unsigned i=0;i<count;i++) {
+                auto e=edges[i];
+                assert(e.right>e.left && e.bottom>e.top);
+                assert(e.left>=desktop.left && e.top>=desktop.top && e.right<=desktop.right && e.bottom<=desktop.bottom);
+                assert(e.right<=crop.left || e.left>=crop.right || e.bottom<=crop.top || e.top>=crop.bottom);
+                assert(e.right-e.left<=2 || e.bottom-e.top<=2);
+            }
+        };
+        check({-600,100,700,900},4);     // Signed multi-monitor coordinates.
+        check({-1600,150,0,850},3);      // Left edge cannot paint inside.
+        check({-1599,-200,1920,800},2);  // One-pixel strip at left and normal bottom.
+        check(desktop,0);               // Full virtual screen has no safe outer pixels.
+    }
     {
         VerticalStitch s;
         assert(append(s, frame(0)) == StitchResult::Started);
@@ -195,5 +214,5 @@ int main() {
         assert(append(s, text_page(71)) == StitchResult::Added);
         assert(s.last_added_rows() == 32);
     }
-    std::cout << "9 vertical stitching test groups passed\n";
+    std::cout << "9 vertical stitching test groups and outline geometry passed\n";
 }
