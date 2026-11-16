@@ -16,6 +16,8 @@
 #include <wchar.h>
 #include "lightcapture_video.h"
 #include "long_outline.h"
+#include "long_finish.h"
+#include "capture_input.h"
 extern void lc_show_support(HWND owner,BOOL zh);
 extern void lc_hide_support(void);
 
@@ -47,11 +49,11 @@ typedef struct {
     BITMAPINFO info;
     int width, height;
 } Image;
-typedef struct { RECT area; int popup; } Candidate;
+typedef struct { RECT area; HWND window; } Candidate;
 enum { NONE, PEN, ARROW, BOX, TEXT };
 static HINSTANCE instance;
 static HWND mainWindow, overlay, longControl;
-static HWND preOverlayFocus;
+static HWND preOverlayFocus, hoverWindow, selectedWindow;
 static HDC frozenDc;
 static HGDIOBJ frozenOld;
 static Image frozen;
@@ -60,7 +62,8 @@ static Candidate candidates[MAX_CANDIDATES];
 static size_t candidateCount;
 static BOOL isZh, selecting, dragged, annotating, saveWithCopy=TRUE;
 static POINT anchor, current, lastInk;
-static RECT toolbar, actions[9];
+static RECT toolbar, actions[9], modeToggle, modeMonitor;
+static enum LcCaptureMode selectionMode;
 static int tool;
 static unsigned hotMods=0, hotKey=VK_F2;
 static WCHAR outputDir[MAX_PATH], exe[MAX_PATH];
@@ -222,11 +225,15 @@ static BOOL CALLBACK on_window(HWND hwnd,LPARAM unused) {
     // A transparent-looking full desktop/container should not swallow all ordinary windows.
     if(popup&&(int64_t)width(clipped)*height(clipped)*100 >= (int64_t)width(virtualScreen)*height(virtualScreen)*96)return TRUE;
     OffsetRect(&clipped,-virtualScreen.left,-virtualScreen.top);
-    candidates[candidateCount++]=(Candidate){clipped,popup};
+    candidates[candidateCount++]=(Candidate){clipped,hwnd};
     return TRUE;
 }
-static RECT find_hover(POINT p) {
-    for(size_t i=0;i<candidateCount;i++)if(PtInRect(&candidates[i].area,p))return candidates[i].area;
+static RECT find_hover(POINT p, HWND *window) {
+    *window=NULL;
+    for(size_t i=0;i<candidateCount;i++)if(PtInRect(&candidates[i].area,p)){
+        *window=candidates[i].window;
+        return candidates[i].area;
+    }
     return (RECT){0};
 }
 static BOOL freeze_screen(void) {
@@ -257,7 +264,9 @@ static void release_freeze(void) {
     frozenDc=NULL;frozenOld=NULL;
     image_free(&frozen);
     selecting=dragged=annotating=FALSE;
-    tool=NONE;hover=selection=toolbar=(RECT){0};
+    tool=NONE;hover=selection=toolbar=modeToggle=modeMonitor=(RECT){0};
+    selectionMode=LC_CAPTURE_SCREENSHOT;
+    hoverWindow=selectedWindow=NULL;
 }
 static void finish_capture(BOOL copy,BOOL save) {
     RECT clipped,bounds={0,0,frozen.width,frozen.height};
@@ -358,10 +367,16 @@ static void begin_text(POINT p){
     textBase=(WNDPROC)SetWindowLongPtrW(textBox,GWLP_WNDPROC,(LONG_PTR)edit_proc);
     SetFocus(textBox);
 }
+static LcOutlineRect capture_rect(RECT r){
+    return (LcOutlineRect){r.left,r.top,r.right,r.bottom};
+}
+static RECT screen_rect(LcOutlineRect r){
+    return (RECT){r.left,r.top,r.right,r.bottom};
+}
 static void layout_toolbar(void){
     toolbar=(RECT){0};
     for(unsigned i=0;i<actionCount;i++)actions[i]=(RECT){0};
-    if(!has_area(selection)||(selecting&&!annotating))return;
+    if(selectionMode==LC_CAPTURE_LONG||!has_area(selection)||(selecting&&!annotating))return;
     POINT fromScreen={selection.left+virtualScreen.left,selection.bottom+virtualScreen.top-1};
     MONITORINFO mi={.cbSize=sizeof mi};
     GetMonitorInfoW(MonitorFromPoint(fromScreen,MONITOR_DEFAULTTONEAREST),&mi);
@@ -379,6 +394,29 @@ static void layout_toolbar(void){
         int r=x+pill+(w-2*pill)*(int)(i+1)/(int)actionCount;
         actions[i]=(RECT){l,y+4,r,y+h-4};
     }
+}
+static void draw_selection_mode(HDC dc){
+    modeToggle=(RECT){0};
+    if(selecting||annotating||!has_area(modeMonitor))return;
+    const int x=modeMonitor.left+12,y=modeMonitor.top+10,h=32;
+    const int right=modeMonitor.right-12;
+    if(right-x<100)return;
+    modeToggle=(RECT){x,y,min(x+145,right),y+h};
+    paint_fill(dc,modeToggle,selectionMode==LC_CAPTURE_LONG?RGB(48,88,120):RGB(28,34,43));
+    paint_frame(dc,modeToggle,RGB(75,93,110));
+    RECT label=modeToggle;
+    DrawTextW(dc,selectionMode==LC_CAPTURE_LONG?tr(L"✓ 长截图 (L)",L"✓ Long screenshot (L)"):
+        tr(L"长截图 (L)",L"Long screenshot (L)"),-1,&label,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
+    RECT hint={modeToggle.right+4,y,right,y+h};
+    if(width(hint)<150){hint=(RECT){x,y+h+4,right,y+h*2+4};}
+    if(!has_area(hint)||hint.bottom>modeMonitor.bottom)return;
+    if(selectionMode!=LC_CAPTURE_LONG&&has_area(selection))return;
+    WCHAR const *instruction=selectionMode==LC_CAPTURE_LONG?
+        tr(L"点窗口或拖框 → 滚动原页面 → Enter 保存 · Esc 取消",L"Click a window or drag a box, scroll the original page, then Enter to save · Esc to cancel"):
+        tr(L"点击窗口或拖动选区 · Enter 确认 · Esc 取消 · F 全屏",L"Click a window or drag a box · Enter confirm · Esc cancel · F full display");
+    hint.right=min(hint.right,hint.left+610);
+    paint_fill(dc,hint,RGB(28,34,43));
+    DrawTextW(dc,instruction,-1,&hint,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
 }
 static void draw_overlay(HWND w){
     PAINTSTRUCT ps;
@@ -421,28 +459,8 @@ static void draw_overlay(HWND w){
             RECT area=actions[i];
             DrawTextW(dc,tr(labels[i][0],labels[i][1]),-1,&area,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
         }
-        const int n=37;
-        RECT hint={toolbar.left,toolbar.bottom+4,toolbar.right,toolbar.bottom+4+n};
-        if(hint.bottom>frozen.height){hint.bottom=toolbar.top-4;hint.top=hint.bottom-n;}
-        if(hint.top>=0){
-            paint_fill(dc,hint,RGB(28,34,43));
-            DrawTextW(dc,tr(L"长截图：点长截图或按 L。滚动原页面；Enter 保存，Esc 取消。",
-                L"Long: click Long or press L. Scroll · Enter save · Esc cancel"),
-                -1,&hint,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
-        }
-    }else if(!selecting){
-        WCHAR const *hint=tr(L"点击窗口或拖动选区 · Enter 确认 · Esc 取消 · F 全屏",L"Click or drag · Enter confirm · Esc cancel · F full display");
-        POINT cursor;
-        GetCursorPos(&cursor);
-        MONITORINFO info={.cbSize=sizeof info};
-        GetMonitorInfoW(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&info);
-        RECT r=info.rcMonitor;
-        OffsetRect(&r,-virtualScreen.left,-virtualScreen.top);
-        r=(RECT){r.left+18,r.top+18,min(r.left+472,r.right-18),r.top+51};
-        if(has_area(r)){
-            paint_fill(dc,r,RGB(28,34,43));DrawTextW(dc,hint,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
-        }
     }
+    draw_selection_mode(dc);
     SelectObject(dc,origFont);
     EndPaint(w,&ps);
 }
@@ -453,7 +471,7 @@ static int videoEdge=1920, videoFps=30;
 static BOOL videoSystem=TRUE, videoMic=FALSE;
 static HWND captureButton, recControl;
 static void selected_action(void (*action)(RECT)){
-    if(!has_area(selection))selection=hover;
+    if(!has_area(selection)){selection=hover;selectedWindow=hoverWindow;}
     if(has_area(selection)){
         RECT r=selection;
         OffsetRect(&r,virtualScreen.left,virtualScreen.top);
@@ -464,6 +482,12 @@ static void confirm_overlay(BOOL copy,BOOL save){
     commit_text();
     if(!has_area(selection))selection=hover;
     if(has_area(selection))finish_capture(copy,save);
+}
+static void choose_long_mode(HWND w){
+    selectionMode=LC_CAPTURE_LONG;
+    tool=NONE;
+    if(has_area(selection))selected_action(start_long);
+    if(IsWindow(w))InvalidateRect(w,NULL,FALSE);
 }
 static POINT mouse_at(LPARAM lp){
     POINT p={GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
@@ -477,10 +501,17 @@ static LRESULT CALLBACK overlay_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
     case WM_ERASEBKGND:return 1;
     case WM_SETCURSOR:SetCursor(LoadCursor(NULL,IDC_CROSS));return TRUE;
     case WM_KEYDOWN:
-        if(wp==VK_ESCAPE){DestroyWindow(w);return 0;}
-        if(wp==VK_RETURN){confirm_overlay(TRUE,saveWithCopy);return 0;}
+        if(wp==VK_ESCAPE||wp==VK_RETURN){
+            RECT target=has_area(selection)?selection:hover;
+            enum LcCaptureAction action=lc_selection_key(selectionMode,
+                wp==VK_ESCAPE?LC_CAPTURE_ESCAPE:LC_CAPTURE_RETURN,selecting||annotating,capture_rect(target));
+            if(action==LC_CAPTURE_CANCEL_SELECTION)DestroyWindow(w);
+            else if(action==LC_CAPTURE_START_LONG)selected_action(start_long);
+            else if(action==LC_CAPTURE_SAVE_SCREENSHOT)confirm_overlay(TRUE,saveWithCopy);
+            return 0;
+        }
         if(wp=='R'&&!selecting&&!annotating){selected_action(start_recording);return 0;}
-        if(wp=='L'&&!selecting&&!annotating){selected_action(start_long);return 0;}
+        if(wp=='L'&&!selecting&&!annotating){choose_long_mode(w);return 0;}
         if(wp=='F'&&!selecting&&!annotating){
             POINT p;
             GetCursorPos(&p);
@@ -488,7 +519,11 @@ static LRESULT CALLBACK overlay_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
             RECT r,f={0,0,frozen.width,frozen.height};
             GetMonitorInfoW(MonitorFromPoint(p,MONITOR_DEFAULTTONEAREST),&mi);r=mi.rcMonitor;
             OffsetRect(&r,-virtualScreen.left,-virtualScreen.top);IntersectRect(&selection,&r,&f);
-            InvalidateRect(w,NULL,FALSE);return 0;
+            selectedWindow=NULL;
+            if(lc_selection_released(selectionMode,capture_rect(selection))==LC_CAPTURE_START_LONG)
+                selected_action(start_long);
+            if(IsWindow(w))InvalidateRect(w,NULL,FALSE);
+            return 0;
         }break;
     case WM_MOUSEMOVE:{
         POINT p=mouse_at(lp);
@@ -501,20 +536,27 @@ static LRESULT CALLBACK overlay_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
                 lastInk=p;
             }
         } else if(selecting){
-            if(abs(p.x-anchor.x)>3||abs(p.y-anchor.y)>3)dragged=TRUE;
+            dragged=lc_selection_is_drag(anchor.x,anchor.y,p.x,p.y,dragged);
             if(dragged)selection=rect_from(anchor,p);
-        } else if(!has_area(selection))hover=find_hover(p);
+        } else if(!has_area(selection))hover=find_hover(p,&hoverWindow);
         InvalidateRect(w,NULL,FALSE);
         return 0;}
     case WM_LBUTTONDOWN:{
         POINT p=mouse_at(lp);
         commit_text();
+        if(has_area(modeToggle)&&PtInRect(&modeToggle,p)){
+            if(selectionMode==LC_CAPTURE_LONG){
+                selectionMode=LC_CAPTURE_SCREENSHOT;
+                InvalidateRect(w,NULL,FALSE);
+            }else choose_long_mode(w);
+            return 0;
+        }
         if(has_area(toolbar)&&PtInRect(&toolbar,p)){
             for(unsigned i=0;i<actionCount;i++)if(PtInRect(&actions[i],p)){
                 if(i<4)tool=tool==(int)i+1?NONE:(int)i+1;
                 else if(i==4)confirm_overlay(TRUE,FALSE);
                 else if(i==5)confirm_overlay(FALSE,TRUE);
-                else if(i==6)selected_action(start_long);
+                else if(i==6)choose_long_mode(w);
                 else if(i==7)selected_action(start_recording);
                 else if(i==8)DestroyWindow(w);
                 if(IsWindow(w))InvalidateRect(w,NULL,FALSE);
@@ -529,7 +571,7 @@ static LRESULT CALLBACK overlay_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
         }
         tool=NONE;
         anchor=current=p;selecting=TRUE;dragged=FALSE;
-        selection=(RECT){0};hover=find_hover(p);SetCapture(w);
+        selection=(RECT){0};selectedWindow=NULL;hover=find_hover(p,&hoverWindow);SetCapture(w);
         InvalidateRect(w,NULL,FALSE);
         return 0;}
     case WM_LBUTTONUP:{
@@ -544,14 +586,18 @@ static LRESULT CALLBACK overlay_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
             ReleaseCapture();
         }else if(selecting){
             selecting=FALSE;
-            if(dragged)selection=rect_from(anchor,p);
-            else selection=find_hover(p);
-            if(width(selection)<2||height(selection)<2)selection=(RECT){0};
+            RECT snap={0};
+            if(!lc_selection_is_drag(anchor.x,anchor.y,p.x,p.y,dragged))snap=find_hover(p,&selectedWindow);
+            LcOutlineRect resolved=lc_selection_resolve(anchor.x,anchor.y,p.x,p.y,dragged,capture_rect(snap));
+            selection=lc_selection_has_area(resolved)?screen_rect(resolved):(RECT){0};
             ReleaseCapture();
+            if(lc_selection_released(selectionMode,resolved)==LC_CAPTURE_START_LONG)
+                selected_action(start_long);
         }
-        InvalidateRect(w,NULL,FALSE);return 0;}
+        if(IsWindow(w))InvalidateRect(w,NULL,FALSE);
+        return 0;}
     case WM_CAPTURECHANGED:
-        if(selecting){selecting=FALSE;selection=(RECT){0};}
+        if(selecting){selecting=FALSE;selection=(RECT){0};selectedWindow=NULL;}
         annotating=FALSE;
         InvalidateRect(w,NULL,FALSE);return 0;
     case WM_DESTROY:
@@ -571,8 +617,13 @@ static void begin_capture(void){
     }
     POINT p;
     GetCursorPos(&p);
+    MONITORINFO monitor={.cbSize=sizeof monitor};
+    modeMonitor=virtualScreen;
+    if(GetMonitorInfoW(MonitorFromPoint(p,MONITOR_DEFAULTTONEAREST),&monitor))
+        IntersectRect(&modeMonitor,&monitor.rcMonitor,&virtualScreen);
+    OffsetRect(&modeMonitor,-virtualScreen.left,-virtualScreen.top);
     p.x-=virtualScreen.left;p.y-=virtualScreen.top;
-    hover=find_hover(p);
+    hover=find_hover(p,&hoverWindow);
     HWND w=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,OCLS,NULL,WS_POPUP,
         virtualScreen.left,virtualScreen.top,frozen.width,frozen.height,NULL,NULL,instance,NULL);
     if(!w){release_freeze();error_text(tr(L"无法打开选区。",L"Could not open the selection."));return;}
@@ -905,15 +956,24 @@ static void clear_long(void){
 }
 static void finish_long(BOOL save){
     if(!IsWindow(longControl)||longSaving)return;
-    BOOL ok=TRUE,savedSingleWithUnmatched=FALSE;
     if(save){
         // Include the last visible position even if Enter beat the sampler.
         if(!longAtLimit)long_sample();
         Image out={0};
         out.pixels=(void*)lc_stitch_view(longStitch,&out.width,&out.height);
+        if(!out.pixels||!lc_long_can_save(longFrame.height,out.height)){
+            BOOL overlapFailed=longSawUnmatchedFrame;
+            DestroyWindow(longControl);
+            if(overlapFailed)
+                error_text(tr(L"没有找到可拼接的重叠内容，未保存长截图。请重新框选，连续向下慢滑后再按回车。",
+                    L"No matching overlap was found. No long screenshot was saved. Select the area again and scroll downward more slowly before pressing Enter."));
+            else
+                error_text(tr(L"没有截到新的页面内容，未保存长截图。请重新框选，向下滚动原页面后再按回车。",
+                    L"No new page content was captured. No long screenshot was saved. Select the area again and scroll the original page down before pressing Enter."));
+            return;
+        }
         WCHAR path[MAX_PATH]={0};
-        ok=out.pixels&&output_named(path,MAX_PATH,FALSE,L"Long Screenshots",L"png")&&write_png_atomic(&out,path);
-        if(!ok){
+        if(!output_named(path,MAX_PATH,FALSE,L"Long Screenshots",L"png")||!write_png_atomic(&out,path)){
             // Don't consume the dialog's keyboard or sample it into a screenshot.
             longSaving=TRUE;
             KillTimer(longControl,LONG_TIMER);
@@ -926,19 +986,18 @@ static void finish_long(BOOL save){
             }else longAtLimit=TRUE; // Retain the already captured image unchanged for retry.
             return;
         }
-        savedSingleWithUnmatched=longSawUnmatchedFrame&&out.height==longFrame.height;
     }
     DestroyWindow(longControl);
-    if(savedSingleWithUnmatched)
-        error_text(tr(L"没有找到可拼接的重叠内容，仅保存了第一屏。可以重新框选，放慢向下滚动。",
-            L"No matching overlap was found. Only the first screen was saved. Try again and scroll down more slowly."));
 }
 static LRESULT CALLBACK long_proc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     switch(m){
-    case WM_HOTKEY:
-        if(wp==LONG_SAVE_HOTKEY&&longEnterHotkey)finish_long(TRUE);
-        else if(wp==LONG_CANCEL_HOTKEY&&longEscHotkey)finish_long(FALSE);
-        return 0;
+    case WM_HOTKEY:{
+        enum LcCaptureKey key=wp==LONG_SAVE_HOTKEY?LC_CAPTURE_RETURN:
+            wp==LONG_CANCEL_HOTKEY?LC_CAPTURE_ESCAPE:LC_CAPTURE_OTHER;
+        enum LcCaptureAction action=lc_long_key(key,longEnterHotkey,longEscHotkey);
+        if(action==LC_CAPTURE_SAVE_LONG)finish_long(TRUE);
+        else if(action==LC_CAPTURE_CANCEL_LONG)finish_long(FALSE);
+        return 0;}
     case WM_TIMER:
         if(wp==LONG_TIMER)long_sample();
         return 0;
@@ -1001,12 +1060,15 @@ static void start_long(RECT r){
         DestroyWindow(longControl);error_text(tr(L"无法开始长截图。",L"Could not start the long screenshot."));return;
     }
     RECT desktop=virtualScreen;
+    HWND snappedSource=selectedWindow; // Keep identity even when a different window overlaps the crop center.
     // Leave the real page uncovered and give it back native focus. We don't
     // forward wheel events: precision touchpad gestures go through Windows to
     // the actual underlying application, just like when LightCapture is idle.
     DestroyWindow(overlay);
     POINT center={r.left+width(r)/2,r.top+height(r)/2};
-    HWND target=GetAncestor(WindowFromPoint(center),GA_ROOT);
+    HWND target=IsWindow(snappedSource)?GetAncestor(snappedSource,GA_ROOT):NULL;
+    if(!IsWindow(target)||target==mainWindow||target==GetDesktopWindow()||target==GetShellWindow()||IsIconic(target))
+        target=GetAncestor(WindowFromPoint(center),GA_ROOT);
     if(!IsWindow(target)||target==mainWindow||target==GetDesktopWindow()||target==GetShellWindow()||IsIconic(target))
         target=preOverlayFocus;
     if(IsWindow(target)&&target!=mainWindow&&target!=GetDesktopWindow()&&target!=GetShellWindow()&&!IsIconic(target))

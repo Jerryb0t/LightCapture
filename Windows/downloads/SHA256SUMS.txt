@@ -1,1 +1,1 @@
-462609bf78adc860cbb9d21bf3339556b21404cd31e43deec4776ec9c0ec2e99  LightCapture-Windows-x64-preview.zip
+4113aee662a506a3a714cc61d28af7eba12e7ca97dd31e833ae5ba85e290b749  LightCapture-Windows-x64-preview.zip

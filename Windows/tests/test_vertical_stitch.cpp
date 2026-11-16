@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: MIT
 #include "lightcapture_stitch.hpp"
 #include "long_outline.h"
+#include "long_finish.h"
+#include "capture_input.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -58,6 +60,56 @@ static void check_document(const VerticalStitch& stitch, int top = 0, int bottom
 }
 
 int main() {
+    {
+        const LcOutlineRect snap={-180,55,860,695}, empty={0,0,0,0};
+        auto clicked=lc_selection_resolve(210,285,212,285,0,snap);
+        assert(clicked.left==snap.left && clicked.top==snap.top && clicked.right==snap.right && clicked.bottom==snap.bottom);
+        assert(lc_selection_released(LC_CAPTURE_SCREENSHOT,clicked)==LC_CAPTURE_NONE);
+        assert(lc_selection_released(LC_CAPTURE_LONG,clicked)==LC_CAPTURE_START_LONG);
+        auto drag=lc_selection_resolve(700,600,200,155,0,snap); // Mouse-up may arrive without a move event.
+        assert(drag.left==200 && drag.top==155 && drag.right==700 && drag.bottom==600);
+        assert(lc_selection_released(LC_CAPTURE_LONG,drag)==LC_CAPTURE_START_LONG);
+        auto returned=lc_selection_resolve(200,155,200,155,1,snap); // Drag back to anchor is not a click.
+        assert(lc_selection_released(LC_CAPTURE_LONG,returned)==LC_CAPTURE_NONE);
+        assert(lc_selection_released(LC_CAPTURE_LONG,empty)==LC_CAPTURE_NONE);
+        assert(lc_selection_key(LC_CAPTURE_LONG,LC_CAPTURE_RETURN,0,empty)==LC_CAPTURE_NONE);
+        assert(lc_selection_key(LC_CAPTURE_LONG,LC_CAPTURE_RETURN,1,drag)==LC_CAPTURE_NONE);
+        assert(lc_selection_key(LC_CAPTURE_LONG,LC_CAPTURE_RETURN,0,drag)==LC_CAPTURE_START_LONG);
+        assert(lc_selection_key(LC_CAPTURE_SCREENSHOT,LC_CAPTURE_RETURN,0,snap)==LC_CAPTURE_SAVE_SCREENSHOT);
+        assert(lc_selection_key(LC_CAPTURE_LONG,LC_CAPTURE_ESCAPE,0,snap)==LC_CAPTURE_CANCEL_SELECTION);
+        assert(lc_long_key(LC_CAPTURE_RETURN,1,1)==LC_CAPTURE_SAVE_LONG);
+        assert(lc_long_key(LC_CAPTURE_ESCAPE,1,1)==LC_CAPTURE_CANCEL_LONG);
+        assert(lc_long_key(LC_CAPTURE_RETURN,0,1)==LC_CAPTURE_NONE);
+        assert(lc_long_key(LC_CAPTURE_ESCAPE,1,0)==LC_CAPTURE_NONE);
+        assert(lc_long_key(LC_CAPTURE_OTHER,1,1)==LC_CAPTURE_NONE);
+    }
+    {
+        // A short full-window selection includes several browser chrome rows.
+        // Retain one title/tab/address block and one footer, not one per viewport.
+        constexpr int top=55, bottom=21;
+        VerticalStitch s;
+        assert(append(s, frame(0, 0, 0, top, bottom))==StitchResult::Started);
+        assert(append(s, frame(22, 0, 0, top, bottom))==StitchResult::Added);
+        assert(append(s, frame(52, 0, 0, top, bottom))==StitchResult::Added);
+        assert(s.height()==H+52);
+        check_document(s,top,bottom);
+    }
+    {
+        // Finish must not produce a Long Screenshots file without verified growth.
+        VerticalStitch s;
+        assert(!lc_long_can_save(H, s.height()));
+        assert(!lc_long_can_save(0, H));
+        assert(append(s, frame(0)) == StitchResult::Started);
+        assert(append(s, frame(0)) == StitchResult::Unchanged);
+        assert(!lc_long_can_save(H, s.height()));
+        assert(append(s, frame(310)) == StitchResult::Ambiguous);
+        assert(!lc_long_can_save(H, s.height()));
+        assert(append(s, frame(1)) == StitchResult::Added);
+        assert(lc_long_can_save(H, s.height()));
+        assert(append(s, frame(310)) == StitchResult::Ambiguous);
+        assert(lc_long_can_save(H, s.height()));
+        check_document(s);
+    }
     {
         LcOutlineRect edges[4];
         const LcOutlineRect desktop{-1600,-200,1920,1080};
@@ -214,5 +266,5 @@ int main() {
         assert(append(s, text_page(71)) == StitchResult::Added);
         assert(s.last_added_rows() == 32);
     }
-    std::cout << "9 vertical stitching test groups and outline geometry passed\n";
+    std::cout << "Vertical stitching, outline geometry, long-mode routing, and output gating passed\n";
 }

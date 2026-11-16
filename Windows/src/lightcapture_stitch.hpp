@@ -82,7 +82,9 @@ public:
         if (height_ == viewport_) {
             // Only consider a contiguous, unchanged anchored band near an edge.
             // Matching still has to prove that the moving region is continuous.
-            const int max_band = viewport_ / 4;
+            // A short browser window can devote over a quarter to fixed chrome.
+            // Keep a minimum moving area even when both edges are stationary.
+            const int max_band = (viewport_ - std::max(32, viewport_ / 5)) / 2;
             while (top < max_band &&
                    difference(previous, top, view, top, 1, 1, 72) <= 0.30) ++top;
             while (bottom < max_band) {
