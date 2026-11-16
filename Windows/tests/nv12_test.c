@@ -1,3 +1,7 @@
+// The test predicates must execute even in an optimized Zig build.
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "lc_nv12.h"
 #include <assert.h>
 #include <stdio.h>

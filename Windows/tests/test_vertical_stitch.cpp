@@ -1,3 +1,7 @@
+// The test predicates must execute even in an optimized Zig build.
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 // SPDX-License-Identifier: MIT
 #include "lightcapture_stitch.hpp"
 #include <algorithm>
