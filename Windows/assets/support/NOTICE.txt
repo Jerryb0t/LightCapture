@@ -1,0 +1,4 @@
+These three receive-only QR images were supplied and approved for public distribution by the author for optional support.
+Only plain regenerated QR images are included; original screenshots, names, avatars, phone numbers and extracted URI sidecars are not bundled.
+Payment provider names belong to their respective owners. No affiliation or endorsement is implied. Users must verify the recipient in their own payment app before paying.
+LightCapture does not initiate or process payments, confirm receipt, or contact payment services.

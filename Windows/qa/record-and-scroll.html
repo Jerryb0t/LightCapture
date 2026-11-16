@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>轻截实机验收页</title>
+<style>
+*{box-sizing:border-box}body{background:#141f30;color:#fff;font:16px system-ui;margin:0}header{position:sticky;top:0;background:#263953;min-height:88px;padding:16px 5vw;display:flex;align-items:center;gap:20px;flex-wrap:wrap;border-bottom:2px solid #7898cf}h1{font-size:21px;margin:0}button{font:inherit;border:1px solid #a4c4f3;border-radius:7px;background:#283b58;color:white;padding:7px 10px}#clock{font:700 26px monospace;color:#9ff2d9;font-variant-numeric:tabular-nums}.track{background:#090e19;height:32px;position:relative}.marker{background:#79eacf;width:10%;height:100%;position:absolute;left:0;animation:roll 3.1s linear infinite alternate;}@keyframes roll{to{left:90%}}main{width:min(940px,94%);margin:18px auto}.row{display:grid;grid-template-columns:135px 1fr;gap:16px;align-items:center;margin:4px 0;border-left:8px solid var(--c);background:#26354a;padding:16px;min-height:var(--h)}.row strong{font:700 31px monospace;color:#d7e8ff}.tag{letter-spacing:.05em;color:#b9d1f2}
+</style>
+<header><h1>轻截 · 实机测试</h1><output id="clock">00:00.00</output><button id="beep">播放 440 Hz 测试音</button><button id="hold">暂停画面</button><span class="tag">画面 · 声音 · 拼接</span></header>
+<div class="track"><div class="marker" id="marker"></div></div>
+<main id="rows"></main>
+<script>
+const rows=document.querySelector('#rows'),clock=document.querySelector('#clock'),hold=document.querySelector('#hold'),marker=document.querySelector('#marker');
+const colors=['#0fb8a5','#81a5ff','#e0aa3c','#ca9bf5','#fc826d'];
+const phrases=['用于手动滚动拍屏','检查上一屏与下一屏的接缝','滚动到可见内容后停留一秒','出错时记录最先重复或丢失的行','这页没有真实个人数据'];
+for(let i=1;i<=60;i++){const row=document.createElement('section');row.className='row';row.style.setProperty('--c',colors[i%colors.length]);row.style.setProperty('--h',(64+(i*37)%59)+'px');const title=document.createElement('strong');title.textContent='ROW '+String(i).padStart(3,'0');const details=document.createElement('span');details.textContent=phrases[i%phrases.length]+' · '+String((i*7937+17)%10007).padStart(5,'0');row.append(title,details);rows.append(row)}
+let start=performance.now(), freeze=null;
+const render=t=>{const e=(freeze??t)-start;clock.textContent=[Math.floor(e/60000),Math.floor(e/1000)%60,Math.floor(e/10)%100].map(n=>String(Math.max(0,n)).padStart(2,'0')).join(':');requestAnimationFrame(render)};requestAnimationFrame(render);
+hold.onclick=()=>{if(freeze===null){freeze=performance.now();hold.textContent='继续画面';marker.style.animationPlayState='paused'}else{start+=performance.now()-freeze;freeze=null;hold.textContent='暂停画面';marker.style.animationPlayState='running'}};
+let audio;document.querySelector('#beep').onclick=async()=>{audio??=new AudioContext();await audio.resume();const osc=audio.createOscillator(),env=audio.createGain(),t=audio.currentTime;osc.frequency.value=440;env.gain.setValueAtTime(0,t);env.gain.linearRampToValueAtTime(.12,t+.05);env.gain.setValueAtTime(.12,t+1.8);env.gain.linearRampToValueAtTime(0,t+2);osc.connect(env).connect(audio.destination);osc.start(t);osc.stop(t+2.05)};
+</script>
+</html>
