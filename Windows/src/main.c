@@ -20,6 +20,10 @@ extern void lc_hide_support(void);
 
 #define CLIP 1
 #define HOTKEY 900
+#define LONG_SAVE_HOTKEY 901
+#define LONG_CANCEL_HOTKEY 902
+#define LONG_TIMER 1
+#define LONG_SAMPLE_MS 180
 #define REOPEN (WM_APP+1)
 #define SETTINGS_CAPTURE 10
 #define SETTINGS_CHOOSE 11
@@ -46,6 +50,7 @@ typedef struct { RECT area; int popup; } Candidate;
 enum { NONE, PEN, ARROW, BOX, TEXT };
 static HINSTANCE instance;
 static HWND mainWindow, overlay, longControl;
+static HWND preOverlayFocus;
 static HDC frozenDc;
 static HGDIOBJ frozenOld;
 static Image frozen;
@@ -550,6 +555,7 @@ static void begin_capture(void){
     if(lc_video_active()){stop_recording();return;}
     if(IsWindow(longControl)){finish_long(TRUE);return;}
     if(IsWindow(overlay)){DestroyWindow(overlay);return;}
+    preOverlayFocus=GetForegroundWindow();
     if(!freeze_screen()){
         release_freeze();error_text(tr(L"无法获取屏幕图像。",L"Could not freeze the screen."));return;
     }
@@ -839,6 +845,7 @@ static Image longFrame;
 static RECT longRegion;
 static HWND longStatus;
 static BOOL longExcluded;
+static BOOL longEnterHotkey,longEscHotkey,longAtLimit;
 static int lastLongResult;
 static const WCHAR longClass[]=L"LightCaptureWindows.LongControl.v1";
 extern void *lc_stitch_new(void);
@@ -876,18 +883,20 @@ static BOOL long_sample(BOOL manual){
         SetWindowTextW(longStatus,line);
     }
     if(result!=2) lastLongResult=result;
-    if(result==5)KillTimer(longControl,1);
+    if(result==5){longAtLimit=TRUE;KillTimer(longControl,LONG_TIMER);}
     return result>=0&&result<=3;
 }
 static void clear_long(void){
     if(longStitch)lc_stitch_free(longStitch);
-    longStitch=NULL;longStatus=NULL;lastLongResult=0;longExcluded=FALSE;
+    longStitch=NULL;longStatus=NULL;lastLongResult=0;longExcluded=FALSE;longAtLimit=FALSE;
     image_free(&longFrame);
 }
 static void finish_long(BOOL save){
     if(!IsWindow(longControl))return;
     BOOL ok=TRUE;
     if(save){
+        // Include the last visible position even if Enter beat the sampler.
+        if(!longAtLimit)long_sample(TRUE);
         Image out={0};
         out.pixels=(void*)lc_stitch_view(longStitch,&out.width,&out.height);
         WCHAR path[MAX_PATH]={0};
@@ -902,20 +911,31 @@ static void finish_long(BOOL save){
 static LRESULT CALLBACK long_proc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     switch(m){
     case WM_CREATE:
-        longStatus=control(w,L"STATIC",tr(L"向下滚动页面，轻截会自动接图。",L"Scroll down to append automatically."),0,9,9,340,24,0);
+        longStatus=control(w,L"STATIC",tr(L"用触控板或滚轮滚动原页面。",L"Scroll the original page with trackpad or wheel."),0,9,9,340,24,0);
         control(w,L"BUTTON",tr(L"手动接一屏",L"Next screen"),BS_PUSHBUTTON,9,39,105,27,101);
         control(w,L"BUTTON",tr(L"保存",L"Save"),BS_PUSHBUTTON,120,39,90,27,102);
         control(w,L"BUTTON",tr(L"取消",L"Cancel"),BS_PUSHBUTTON,216,39,90,27,103);
+        return 0;
+    case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
+    case WM_HOTKEY:
+        if(wp==LONG_SAVE_HOTKEY&&longEnterHotkey)finish_long(TRUE);
+        else if(wp==LONG_CANCEL_HOTKEY&&longEscHotkey)finish_long(FALSE);
         return 0;
     case WM_COMMAND:
         if(LOWORD(wp)==101)long_sample(TRUE);
         else if(LOWORD(wp)==102)finish_long(TRUE);
         else if(LOWORD(wp)==103)finish_long(FALSE);
         return 0;
-    case WM_TIMER:long_sample(FALSE);return 0;
+    case WM_TIMER:
+        if(wp==LONG_TIMER)long_sample(FALSE);
+        return 0;
     case WM_CLOSE:finish_long(FALSE);return 0;
     case WM_DESTROY:
-        KillTimer(w,1);longControl=NULL;clear_long();return 0;
+        KillTimer(w,LONG_TIMER);
+        if(longEnterHotkey)UnregisterHotKey(w,LONG_SAVE_HOTKEY);
+        if(longEscHotkey)UnregisterHotKey(w,LONG_CANCEL_HOTKEY);
+        longEnterHotkey=longEscHotkey=FALSE;
+        longControl=NULL;clear_long();return 0;
     }
     return DefWindowProcW(w,m,wp,lp);
 }
@@ -923,7 +943,16 @@ static void start_long(RECT r){
     if(width(r)<80||height(r)<100){
         error_text(tr(L"请至少选择 80 × 100 像素的内容区域。",L"Select a region of at least 80 × 100 pixels."));return;
     }
+    // Leave the real page uncovered and give it back native focus. We don't
+    // forward wheel events: precision touchpad gestures go through Windows to
+    // the actual underlying application, just like when LightCapture is idle.
     DestroyWindow(overlay);
+    POINT center={r.left+width(r)/2,r.top+height(r)/2};
+    HWND target=GetAncestor(WindowFromPoint(center),GA_ROOT);
+    if(!IsWindow(target)||target==mainWindow||target==GetDesktopWindow()||target==GetShellWindow()||IsIconic(target))
+        target=preOverlayFocus;
+    if(IsWindow(target)&&target!=mainWindow&&target!=GetDesktopWindow()&&target!=GetShellWindow()&&!IsIconic(target))
+        SetForegroundWindow(target);
     DwmFlush();
     longRegion=r;
     longStitch=lc_stitch_new();
@@ -954,10 +983,22 @@ static void start_long(RECT r){
     if(!longControl){
         clear_long();error_text(tr(L"无法打开拼接控件。",L"Could not open the stitching controls."));return;
     }
+    // Unmodified keys are reserved only during this user-initiated session.
+    // A different app can already own one; its native registration is respected,
+    // with the floating buttons still usable and F2 (or the set key) still saving.
+    longEnterHotkey=RegisterHotKey(longControl,LONG_SAVE_HOTKEY,MOD_NOREPEAT,VK_RETURN);
+    longEscHotkey=RegisterHotKey(longControl,LONG_CANCEL_HOTKEY,MOD_NOREPEAT,VK_ESCAPE);
+    if(longEnterHotkey)SetWindowTextW(GetDlgItem(longControl,102),tr(L"保存 · Enter",L"Save · Enter"));
+    if(longEscHotkey)SetWindowTextW(GetDlgItem(longControl,103),tr(L"取消 · Esc",L"Cancel · Esc"));
     longExcluded=SetWindowDisplayAffinity(longControl,WDA_EXCLUDEFROMCAPTURE);
     if(outside||longExcluded)ShowWindow(longControl,SW_SHOWNOACTIVATE);
-    // If all usable screen is selected on older Windows, same global shortcut still saves.
-    SetTimer(longControl,1,400,NULL);
+    else if(!longEnterHotkey||!longEscHotkey){
+        finish_long(FALSE);
+        error_text(tr(L"找不到控件位置，且回车或 Esc 被占用。请框选稍小的区域。",
+            L"No space for capture controls and Enter or Esc is already taken. Select a smaller area."));
+        return;
+    }
+    SetTimer(longControl,LONG_TIMER,LONG_SAMPLE_MS,NULL);
 }
 
 static const WCHAR recordClass[]=L"LightCaptureWindows.RecordingControl.v1";

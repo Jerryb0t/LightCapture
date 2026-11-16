@@ -76,6 +76,21 @@ int main() {
         check_document(s);
     }
     {
+        // Touchpad: move down, reverse more than once, return to the previous
+        // bottom, then continue. Earlier viewports cannot be duplicated.
+        VerticalStitch s;
+        assert(append(s, frame(0)) == StitchResult::Started);
+        assert(append(s, frame(31)) == StitchResult::Added);
+        assert(append(s, frame(58)) == StitchResult::Added);
+        assert(append(s, frame(35)) == StitchResult::Ambiguous);
+        assert(append(s, frame(12)) == StitchResult::Ambiguous);
+        assert(s.height() == H + 58 && s.last_added_rows() == 0);
+        assert(append(s, frame(58)) == StitchResult::Unchanged);
+        assert(append(s, frame(79)) == StitchResult::Added);
+        assert(s.height() == H + 79 && s.last_added_rows() == 21);
+        check_document(s);
+    }
+    {
         VerticalStitch s;
         assert(append(s, frame(0, 0, 0, 15, 19)) == StitchResult::Started);
         assert(append(s, frame(29, 0, 0, 15, 19)) == StitchResult::Added);
@@ -180,5 +195,5 @@ int main() {
         assert(append(s, text_page(71)) == StitchResult::Added);
         assert(s.last_added_rows() == 32);
     }
-    std::cout << "8 vertical stitching test groups passed\n";
+    std::cout << "9 vertical stitching test groups passed\n";
 }
