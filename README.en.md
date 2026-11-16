@@ -8,7 +8,7 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 **Current source: 0.2.4 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
 
-**Idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
+**0.2.3 idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
 
 ## Using LightCapture
 
