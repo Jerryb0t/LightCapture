@@ -6,7 +6,7 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 [简体中文](README.md)
 
-**Download [LightCapture 0.2.3](https://github.com/Jerryb0t/LightCapture/releases/tag/v0.2.3)** (Apple silicon, macOS 15+)
+**Current source: 0.2.4 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
 
 **Idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
 
@@ -37,7 +37,7 @@ Synthetic pixel, Retina, window-layer, lifecycle, selection and bilingual layout
 
 ## Check for updates
 
-Choose **Check for Updates** at the bottom of the main window for a manual check. **Check at launch** is optional and off by default. When enabled, it checks this project's GitHub Releases API at launch or reopen, at most once per 24 hours. There is no persistent timer or background polling; when disabled, no automatic checks occur. This option does not install updates. Starting with 0.2.3, official packages use [GitHub Releases](https://github.com/Jerryb0t/LightCapture/releases) and signed Sparkle updates. Install newer versions only when you choose to. If you are on 0.2.2 or earlier, install the first official update-enabled package from Releases.
+Choose **Check for Updates** at the bottom of the main window for a manual check. **Check at launch** is optional and off by default. When enabled, it checks this project's GitHub Releases API at launch or reopen, at most once per 24 hours. There is no persistent timer or background polling; when disabled, no automatic checks occur. This option does not install updates. The source integrates signed Sparkle updates, but the official ZIP and signed appcast are not yet published. Public one-click updating is not currently available. Publication requires separate update-key signing and verification; there is no automatic download or installation. Versions 0.2.2 and earlier have no in-app installer.
 
 ## Build from source
 
