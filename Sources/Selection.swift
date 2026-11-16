@@ -104,7 +104,12 @@ final class SelectionView: NSView {
     var selectedMode:CaptureMode {CaptureMode(rawValue:modePicker.indexOfSelectedItem) ?? .screenshot}
     func setMode(_ mode:CaptureMode){modePicker.selectItem(at:mode.rawValue);updateMode()}
     func setScreenshotAllowed(_ allowed:Bool){modePicker.item(at:0)?.isEnabled=allowed;updateMode()}
-    @objc private func updateMode(){annotateButton.isEnabled = pendingRect != nil && selectedMode == .screenshot}
+    @objc private func updateMode(){
+        annotateButton.isEnabled = pendingRect != nil && selectedMode == .screenshot
+        // Long capture starts immediately after choosing its viewport; leave no
+        // full-screen selection window in front of the app that must scroll.
+        if pendingRect != nil && selectedMode == .longScreenshot {confirmSelection()}
+    }
     private let annotateButton = NSButton(title:L("标注…"),target:nil,action:nil)
     private let confirmButton = NSButton(title:L("确认 ↩"),target:nil,action:nil)
     private let cancelButton = NSButton(title:L("取消 Esc"),target:nil,action:nil)

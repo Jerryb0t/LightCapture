@@ -19,6 +19,9 @@ enum LongFrameProcessor {
         guard previous.width == next.width, next.height <= previous.height else {throw StitchError.incompatibleSize}
         let signature=try signature(next)
         if signature == lastSignature {return LongFrameResult(stitch:StitchResult(image:previous,addedRows:0),signature:signature)}
+        // append also recognizes a viewport fully contained in older composite rows.
+        // Returning its signature (even when addedRows == 0) keeps idle sampling cheap
+        // while the user scrolls back, then forward to the already captured frontier.
         return LongFrameResult(stitch:try ImageStitcher.append(previous:previous,next:next),signature:signature)
     }
 }

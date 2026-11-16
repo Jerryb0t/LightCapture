@@ -21,7 +21,8 @@ enum StitchError: LocalizedError {
 
 /// Conservative, offline vertical stitching. Never guesses on ambiguous/low-information images.
 /// Inputs must represent the same fixed viewport width and scale. Sticky headers, animations,
-/// horizontal movement, upward scrolling and zoom changes are deliberately not repaired.
+/// horizontal movement and zoom changes are deliberately not repaired. Revisiting rows
+/// already assembled is ignored; scrolling above the initial capture never prepends data.
 enum ImageStitcher {
     static let maximumPixels = 24_000_000
     static let maximumDimension = 32_768
@@ -60,8 +61,20 @@ enum ImageStitcher {
         if a.rgba.suffix(b.rgba.count).elementsEqual(b.rgba) {
             return StitchResult(image: previous, addedRows: 0)
         }
+        // A viewport can move back into ANY earlier part of the composite. Do this
+        // before trying short tail overlaps: repeated browser text can otherwise look
+        // like a new forward page and append the same rows a second time.
+        if containsViewport(a, b) {
+            return StitchResult(image: previous, addedRows: 0)
+        }
         let minimumOverlap = max(24, viewport / 10)
         guard minimumOverlap < viewport else { throw StitchError.noOverlap }
+        // Detect movement above the first captured row. We intentionally do not
+        // prepend: keeping the user's original start point is safer than inventing
+        // content order. Also reject when reverse AND forward are plausible.
+        if hasReverseOverlap(a, b, minimumOverlap: minimumOverlap) {
+            throw StitchError.noOverlap
+        }
         var scored: [(overlap: Int, error: Double)] = []
         scored.reserveCapacity(viewport)
         for overlap in minimumOverlap..<viewport {
@@ -92,6 +105,61 @@ enum ImageStitcher {
             throw StitchError.cannotDecode
         }
         return StitchResult(image: image, addedRows: added)
+    }
+
+    /// KMP over bounded per-row sample hashes finds potential exact matches in O(H).
+    /// Hashes only filter candidates. Full normalized bytes must match before accepting,
+    /// so collisions, blank rows and repetitive layouts cannot manufacture a match.
+    private static func containsViewport(_ composite: Pixels, _ viewport: Pixels) -> Bool {
+        guard composite.height > viewport.height else { return false }
+        let pattern = rowKeys(viewport), rows = rowKeys(composite)
+        var prefix = [Int](repeating: 0, count: pattern.count)
+        var matched = 0
+        for index in 1..<pattern.count {
+            while matched > 0 && pattern[index] != pattern[matched] { matched = prefix[matched - 1] }
+            if pattern[index] == pattern[matched] { matched += 1 }
+            prefix[index] = matched
+        }
+        matched = 0
+        let rowBytes = composite.width * 4
+        for index in rows.indices {
+            while matched > 0 && rows[index] != pattern[matched] { matched = prefix[matched - 1] }
+            if rows[index] == pattern[matched] { matched += 1 }
+            if matched == pattern.count {
+                let start = (index + 1 - viewport.height) * rowBytes
+                if composite.rgba[start..<(start + viewport.rgba.count)].elementsEqual(viewport.rgba) { return true }
+                matched = prefix[matched - 1]
+            }
+        }
+        return false
+    }
+
+    private static func rowKeys(_ image: Pixels) -> [UInt64] {
+        let columns = min(64, image.width)
+        return (0..<image.height).map { y in
+            var key: UInt64 = 14695981039346656037
+            for column in 0..<columns {
+                let x = column * (image.width - 1) / max(1, columns - 1)
+                let offset = (y * image.width + x) * 4
+                for component in 0..<4 { key = (key ^ UInt64(image.rgba[offset + component])) &* 1099511628211 }
+            }
+            return key
+        }
+    }
+
+    private static func hasReverseOverlap(_ composite: Pixels, _ viewport: Pixels, minimumOverlap: Int) -> Bool {
+        // If composite.top matches viewport.bottom, this frame extends above the
+        // original starting point. Require substantial textured overlap and dense
+        // verification, not only a matching white margin or a single text baseline.
+        for overlap in minimumOverlap..<viewport.height {
+            let start = viewport.height - overlap
+            if difference(composite, 0, viewport, start, overlap, rows: 32, columns: 32) <= 0.5,
+               difference(composite, 0, viewport, start, overlap, rows: 180, columns: 96) <= 0.5,
+               texture(composite, height: overlap) >= 5.0 {
+                return true
+            }
+        }
+        return false
     }
 
     private static func difference(_ a: Pixels, _ ay: Int, _ b: Pixels, _ by: Int,

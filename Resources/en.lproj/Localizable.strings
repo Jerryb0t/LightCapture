@@ -189,3 +189,17 @@
 "发现 %@。可下载并验证安装，更新会重新启动轻截。" = "Version %@ is available. Download and verify it to install; LightCapture will restart.";
 
 "此构建未包含更新组件，请从官方发布获取新版。" = "This build does not include the updater. Get the latest official release.";
+
+"完成并保存 ↩" = "Finish and Save ↩";
+
+"快捷键暂不可用，请使用完成或取消按钮；在控件之外滚动页面。" = "Shortcuts unavailable. Use Finish or Cancel; scroll outside this panel.";
+
+"在原页面缓慢向下滚动，停稳后自动拼接。\nEnter 完成保存 · Esc 取消；选区不拦截滚动。" = "Scroll down slowly in the original page; pause to stitch.\nEnter saves · Esc cancels. The selection does not block scrolling.";
+
+"屏幕采样超时，本次长截图已取消。请稍后重试；若仍失败，请退出后重开轻截。" = "Screen sampling timed out and the scrolling capture was canceled. Retry shortly, or quit and reopen LightCapture if needed.";
+
+"上一帧仍在等待系统响应，请稍后重试。" = "The previous frame is still waiting for the system. Retry shortly.";
+
+"仅保存已有部分" = "Save Captured Portion";
+
+"%@\n最后画面未确认收录，可仅保存已有部分。" = "%@\nThe last view was not confirmed. You can save the captured portion.";

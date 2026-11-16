@@ -14,7 +14,8 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 - Press **Control+A** to select a region or snap to a window. The selection toolbar switches between screenshots, scrolling capture, and recording. **Enter** copies and saves a screenshot by default; settings can make it copy-only.
 - Annotate screenshots with a pen, arrow, rectangle, or text. Full-screen screenshots are also available.
-- For a scrolling screenshot, scroll the page yourself and let LightCapture stitch the frames together. You can also append a frame manually. Fixed headers, animation, and complex pages may not stitch cleanly.
+- Scrolling capture starts after selecting its mode and region. Scroll slowly in the original page; Enter finishes and saves, Escape cancels. Clickable finish/cancel and manual append remain available. Revisiting already captured content does not extend the image again. No injected scrolling or Accessibility permission is required. With no free space, a small control panel occupies a corner; scroll outside it. A visible warning appears if temporary shortcuts cannot register. Fixed headers, animation, periodic patterns, and complex pages may not stitch reliably.
+- Finishing samples one final frame. On a capture timeout, explicitly save the already captured portion if needed. If the system request never returns, restart the app rather than stacking capture tasks.
 - Record a full display or a region. Select resolution and a target frame rate independently: 24, 30 (default), or 60 fps. The target is a maximum, not guaranteed; output depends on display refresh, motion, and hardware.
 - Choose system audio and microphone separately. On a fresh configuration, system audio is on and the microphone is off. Existing choices are preserved. The app asks for microphone permission only when you start a recording with it enabled. When both inputs are enabled, it mixes them into one playback track without re-encoding video.
 - Press the same shortcut to stop and save. The control panel stays outside the recording area when possible and hides when there is no room.
@@ -66,3 +67,7 @@ LightCapture source and its original app icon are available under the [MIT Licen
 X and GitHub marks are their owners’ trademarks, not MIT-licensed assets. See [brand notices](Artwork/AuthorLinks/NOTICE.txt). The author has approved public distribution of the three receive-only QR images; see [QR notices](Artwork/SupportQR/NOTICE.txt). Original screenshots and private sidecar data are not included.
 
 Optional synthetic recording integration: `./test.sh --recording-av` encodes generated moving frames and tones at 24/30/60 fps, verifies single-track mixing with unchanged compressed video packets/timestamps, and checks independent audio toggles. It does not access the screen or microphone. It requires working local H.264/AAC codecs and exits nonzero if unavailable.
+
+## Windows preview
+
+[Windows x64 unsigned preview](https://github.com/Jerryb0t/LightCapture/tree/windows-preview/Windows) is maintained on a separate preview branch; its features and validation differ from macOS.

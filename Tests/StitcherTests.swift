@@ -10,13 +10,25 @@ import CoreGraphics
     static func bytes(_ image: CGImage) -> [UInt8] {
         Array((image.dataProvider!.data! as Data))
     }
-    static func frame(width: Int = 128, height: Int = 240, offset: Int = 0, seed: Int = 0) -> CGImage {
+    static func frame(width: Int = 128, height: Int = 240, offset: Int = 0, seed: Int = 0, periodic: Bool = false) -> CGImage {
         var data = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height { for x in 0..<width {
             let yy = y + offset, p = (y * width + x) * 4
             data[p] = UInt8(((yy * 17 + x * 7 + yy * x * 3 + seed * 31) ^ (yy >> 2)) % 256)
             data[p+1] = UInt8(((yy * 31 + x * 11 + seed * 97) ^ (yy >> 1)) % 256)
             data[p+2] = UInt8((yy * yy + x * 23 + seed * 157) % 256)
+            if !periodic {
+                // The legacy fixture repeated every 1024 rows, so a large viewport
+                // supported both forward and reverse alignments. Use a nonperiodic
+                // row marker for positive direction tests; retain legacy below.
+                var marker = UInt64(yy) &+ 0x9e3779b97f4a7c15
+                marker = (marker ^ (marker >> 30)) &* 0xbf58476d1ce4e5b9
+                marker = (marker ^ (marker >> 27)) &* 0x94d049bb133111eb
+                marker ^= marker >> 31
+                data[p] ^= UInt8(truncatingIfNeeded: marker)
+                data[p+1] ^= UInt8(truncatingIfNeeded: marker >> 8)
+                data[p+2] ^= UInt8(truncatingIfNeeded: marker >> 16)
+            }
         }}
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
@@ -61,6 +73,7 @@ import CoreGraphics
         rejects({ try ImageStitcher.append(previous: first, next: frame(offset: 235)) }, "reject insufficient overlap")
         rejects({ try ImageStitcher.append(previous: frame(width: 16, height: 32769), next: frame(width: 16)) }, "reject dimension limit before pixel allocation")
         rejects({ try ImageStitcher.append(previous: repetitiveFrame(offset: 0), next: repetitiveFrame(offset: 12)) }, "reject ambiguous repetitive stripes")
+        rejects({ try ImageStitcher.append(previous: frame(width: 1920, height: 1080, periodic: true), next: frame(width: 1920, height: 1080, offset: 520, periodic: true)) }, "reject legacy periodic forward/reverse ambiguity")
         let started = Date()
         let large = try ImageStitcher.append(previous: frame(width: 1920, height: 1080), next: frame(width: 1920, height: 1080, offset: 520))
         check(large.addedRows == 520 && large.image.height == 1600, "Retina-size viewport")
