@@ -48,6 +48,14 @@ import AppKit
         app.automaticUpdateCheckbox.state = .off;app.toggleAutomaticUpdate()
         app.checkAutomaticallyIfDue(now:old.addingTimeInterval(200_000))
         check(automaticRequests==2 && !preferences.bool(forKey:"automaticUpdateCheck"),"turning OFF disables subsequent checks")
+        app.checkForUpdate={ _ in automaticRequests += 1;return candidate }
+        preferences.set(true,forKey:"automaticUpdateCheck")
+        check(!app.windowShouldClose(app.window) && app.window == nil,"close drops update UI")
+        app.checkAutomaticallyIfDue(now:old.addingTimeInterval(200_000))
+        for _ in 0..<50 where automaticRequests < 3 {try await Task.sleep(nanoseconds:2_000_000)}
+        check(automaticRequests == 3 && app.window == nil,"opt-in update can complete without building settings")
+        app.buildUI()
+        check(!app.updateReleaseButton.isHidden && !app.updateStatus.isHidden && app.updateStatus.stringValue.contains(candidate.tag),"reopened settings shows pending candidate")
         print("PASS default OFF, explicit startup opt-in, 24h throttle, manual check, busy/duplicate block, valid release and no-package states, no actual network or browser")
     }
 }

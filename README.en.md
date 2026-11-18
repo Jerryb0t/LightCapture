@@ -6,9 +6,11 @@ A lightweight, native macOS tool for screenshots and screen recording. Built wit
 
 [简体中文](README.md)
 
-**Current source: 0.2.7 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
+**Current source: 0.2.8 (Apple silicon, macOS 15+). A public macOS package and signed update feed are not yet published; source validation does not imply a working public one-click update.**
 
 **0.2.3 idle physical memory footprint: about 29 MB.** On a 16 GB M5 MacBook Air (macOS 27.2.1), the app was hidden and sampled at 30, 60 and 90 seconds. RSS was about 101 MB and is a different metric. Recording memory was not measured.
+
+In 0.2.8, the settings window is created on demand rather than during background login startup. The red close button releases the window without disabling capture or recording-stop shortcuts.
 
 ## Using LightCapture
 

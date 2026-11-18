@@ -18,7 +18,7 @@ import Carbon
   app.loginCheckbox.state = .on;app.toggleLoginItem();RunLoop.current.run(until:Date().addingTimeInterval(0.05));precondition(fake.enables==1 && app.loginCheckbox.state == .on)
   app.loginCheckbox.state = .off;app.toggleLoginItem();RunLoop.current.run(until:Date().addingTimeInterval(0.05));precondition(fake.disables==1 && app.loginCheckbox.state == .off)
   print("PASS enable/disable via injected fake only; no actual OS login-item changes")
-  precondition(app.windowShouldClose(app.window)==false && !app.window.isVisible)
+  precondition(app.windowShouldClose(app.window)==false && app.window == nil)
   precondition(!app.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
   print("PASS red close hides, no last-window termination")
   precondition(app.captureShortcutAction == .capture)
