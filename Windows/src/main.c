@@ -40,6 +40,7 @@ extern void lc_hide_support(void);
 #define MAX_PIXELS 24000000LL
 #define REGKEY L"Software\\LightCapture"
 #define WCLS L"LightCaptureWindows.Settings.v1"
+#define DISPATCH_CLASS L"LightCaptureWindows.Dispatch.v1"
 #define OCLS L"LightCaptureWindows.Overlay.v1"
 #define IDENTITY L"Local\\LightCaptureWindows.app.v1"
 
@@ -52,7 +53,7 @@ typedef struct {
 typedef struct { RECT area; HWND window; } Candidate;
 enum { NONE, PEN, ARROW, BOX, TEXT };
 static HINSTANCE instance;
-static HWND mainWindow, overlay, longControl;
+static HWND mainWindow, dispatchWindow, overlay, longControl;
 static HWND preOverlayFocus, hoverWindow, selectedWindow;
 static HDC frozenDc;
 static HGDIOBJ frozenOld;
@@ -198,7 +199,7 @@ static BOOL copy_dib(const Image *d) {
         (BYTE*)d->pixels+(d->height-1-y)*stride,stride);
     GlobalUnlock(data);
     BOOL ok=FALSE;
-    if(OpenClipboard(mainWindow)) {
+    if(OpenClipboard(dispatchWindow)) {
         ok=EmptyClipboard()&&SetClipboardData(CF_DIB,data);
         CloseClipboard();
     }
@@ -641,7 +642,7 @@ static int hot_index(void){
     return 1;
 }
 static BOOL bind_hotkey(unsigned mods,unsigned key) {
-    return RegisterHotKey(mainWindow,HOTKEY,mods|MOD_NOREPEAT,key);
+    return RegisterHotKey(dispatchWindow,HOTKEY,mods|MOD_NOREPEAT,key);
 }
 static void key_status(void) {
     if(keyStatus) SetWindowTextW(keyStatus,hotPaused?tr(L"快捷键已暂停",L"Shortcut paused"):
@@ -727,13 +728,19 @@ static HWND control(HWND parent,const WCHAR *cls,const WCHAR *title,DWORD style,
     if(handle) SendMessageW(handle,WM_SETFONT,(WPARAM)font,TRUE);
     return handle;
 }
+static void close_settings(void) {
+    lc_hide_support();
+    if(IsWindow(mainWindow))DestroyWindow(mainWindow);
+}
+
 static LRESULT CALLBACK main_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
     enum { SETTINGS_PAUSE=18, SETTINGS_GITHUB=19, SETTINGS_X=20, SETTINGS_VIDEO_EDGE=21, SETTINGS_VIDEO_FPS=22, SETTINGS_VIDEO_SYSTEM=23, SETTINGS_VIDEO_MIC=24, SETTINGS_SUPPORT=25 };
     switch(m){
     case WM_CREATE:
         control(w,L"STATIC",tr(L"轻截  ·  LightCapture",L"LightCapture"),0,20,20,350,24,0);
         control(w,L"STATIC",tr(L"原生、轻量的截图与录屏工具",L"Native, lightweight screen capture"),0,20,48,440,20,0);
-        captureButton=control(w,L"BUTTON",tr(L"开始截图",L"Start capture"),WS_TABSTOP|BS_PUSHBUTTON,20,83,146,32,SETTINGS_CAPTURE);
+        captureButton=control(w,L"BUTTON",lc_video_active()?tr(L"停止并保存录屏",L"Stop and save recording"):
+          tr(L"开始截图",L"Start capture"),WS_TABSTOP|BS_PUSHBUTTON,20,83,146,32,SETTINGS_CAPTURE);
         control(w,L"STATIC",tr(L"全局快捷键",L"Global shortcut"),0,20,137,140,25,0);
         hotChooser=control(w,L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST,170,131,88,120,SETTINGS_KEY);
         for(unsigned i=0;i<sizeof keys/sizeof keys[0];i++)SendMessageW(hotChooser,CB_ADDSTRING,0,(LPARAM)keys[i]);
@@ -801,7 +808,7 @@ static LRESULT CALLBACK main_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
             break;}
         case SETTINGS_APPLY_KEY:change_hotkey();break;
         case SETTINGS_PAUSE:
-            if(hotRegistered){UnregisterHotKey(w,HOTKEY);hotRegistered=FALSE;hotPaused=TRUE;}
+            if(hotRegistered){UnregisterHotKey(dispatchWindow,HOTKEY);hotRegistered=FALSE;hotPaused=TRUE;}
             else {hotRegistered=bind_hotkey(hotMods,hotKey);hotPaused=FALSE;}
             key_status();break;
         case SETTINGS_LOGIN:{
@@ -822,26 +829,56 @@ static LRESULT CALLBACK main_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
         case SETTINGS_GITHUB:ShellExecuteW(w,L"open",L"https://github.com/Jerryb0t",NULL,NULL,SW_SHOWNORMAL);break;
         case SETTINGS_X:ShellExecuteW(w,L"open",L"https://x.com/Jerryb0t",NULL,NULL,SW_SHOWNORMAL);break;
         case SETTINGS_QUIT:
-            lc_hide_support();
             if(lc_video_active())stop_recording();
             if(IsWindow(longControl))finish_long(FALSE);
             if(IsWindow(overlay))DestroyWindow(overlay);
-            DestroyWindow(w);break;
+            close_settings();
+            DestroyWindow(dispatchWindow);break;
         }return 0;
+    case WM_CLOSE:close_settings();return 0;
+    case WM_DESTROY:
+        mainWindow=NULL;
+        captureButton=hotChooser=modeCheck=folderLabel=keyStatus=NULL;
+        return 0;
+    }
+    return DefWindowProcW(w,m,wp,lp);
+}
+
+static BOOL show_settings(void) {
+    if(!mainWindow){
+        DWORD style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;
+        UINT dpi=GetDpiForSystem();
+        RECT size={0,0,MulDiv(472,dpi,96),MulDiv(555,dpi,96)};
+        AdjustWindowRectExForDpi(&size,style,FALSE,WS_EX_APPWINDOW,dpi);
+        mainWindow=CreateWindowExW(WS_EX_APPWINDOW,WCLS,tr(L"轻截",L"LightCapture"),style,
+          CW_USEDEFAULT,CW_USEDEFAULT,width(size),height(size),NULL,NULL,instance,NULL);
+        if(!mainWindow)return FALSE;
+        key_status();
+    }
+    ShowWindow(mainWindow,IsIconic(mainWindow)?SW_RESTORE:SW_SHOW);
+    SetForegroundWindow(mainWindow);
+    return TRUE;
+}
+
+// A small, always-hidden top-level window provides a discoverable single-instance
+// receiver and holds the hotkey and recording watchdog independently of settings.
+static LRESULT CALLBACK dispatch_proc(HWND w,UINT m,WPARAM wp,LPARAM lp) {
+    switch(m){
     case WM_TIMER:
         if(wp==2&&lc_video_finished())stop_recording();
         return 0;
     case WM_HOTKEY:if(wp==HOTKEY)begin_capture();return 0;
-    case WM_CLOSE:lc_hide_support();ShowWindow(w,SW_HIDE);return 0;
     case REOPEN:
-        ShowWindow(w,IsIconic(w)?SW_RESTORE:SW_SHOW);
-        SetForegroundWindow(w);return 0;
+        if(!show_settings())error_text(tr(L"无法打开设置。",L"Could not open settings."));
+        return 0;
+    case WM_CLOSE:return 0;
     case WM_DESTROY:
         if(hotRegistered)UnregisterHotKey(w,HOTKEY);
         PostQuitMessage(0);return 0;
     }
     return DefWindowProcW(w,m,wp,lp);
 }
+
 int WINAPI wWinMain(HINSTANCE h,HINSTANCE unused,PWSTR cmd,int show) {
     (void)unused;(void)show;
     instance=h;
@@ -851,13 +888,16 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE unused,PWSTR cmd,int show) {
     if(GetLastError()==ERROR_ALREADY_EXISTS){
         BOOL opened=FALSE;
         for(int i=0;i<25&&!opened;i++){
-            HWND other=FindWindowW(WCLS,NULL);
+            HWND other=FindWindowW(DISPATCH_CLASS,NULL);
+            // Reopen a still-running legacy build, which received on its settings window.
+            if(!other)other=FindWindowW(WCLS,NULL);
             if(other){
                 DWORD owner=0;
                 GetWindowThreadProcessId(other,&owner);
                 if(owner)AllowSetForegroundWindow(owner);
-                PostMessageW(other,REOPEN,0,0);opened=TRUE;
-            }else Sleep(40);
+                opened=PostMessageW(other,REOPEN,0,0);
+            }
+            if(!opened)Sleep(40);
         }
         CloseHandle(one);
         return opened?0:1;
@@ -879,26 +919,31 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE unused,PWSTR cmd,int show) {
         .hCursor=LoadCursor(NULL,IDC_ARROW),.hbrBackground=(HBRUSH)(COLOR_WINDOW+1),.lpszClassName=WCLS,.hIconSm=icon};
     WNDCLASSEXW overlayClass={.cbSize=sizeof(overlayClass),.lpfnWndProc=overlay_proc,.hInstance=h,
         .hCursor=LoadCursor(NULL,IDC_CROSS),.lpszClassName=OCLS};
-    if(!RegisterClassExW(&mainClass)||!RegisterClassExW(&overlayClass))goto shutdown;
-    DWORD style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;
-    RECT size={0,0,MulDiv(472,GetDpiForSystem(),96),MulDiv(555,GetDpiForSystem(),96)};
-    AdjustWindowRectExForDpi(&size,style,FALSE,WS_EX_APPWINDOW,GetDpiForSystem());
-    mainWindow=CreateWindowExW(WS_EX_APPWINDOW,WCLS,tr(L"轻截",L"LightCapture"),style,CW_USEDEFAULT,CW_USEDEFAULT,
-      width(size),height(size),NULL,NULL,h,NULL);
-    if(!mainWindow)goto shutdown;
+    WNDCLASSEXW dispatchClass={.cbSize=sizeof(dispatchClass),.lpfnWndProc=dispatch_proc,
+        .hInstance=h,.lpszClassName=DISPATCH_CLASS};
+    int exitCode=1;
+    if(!RegisterClassExW(&mainClass)||!RegisterClassExW(&overlayClass)||!RegisterClassExW(&dispatchClass))
+        goto shutdown;
+    dispatchWindow=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,DISPATCH_CLASS,NULL,WS_POPUP,
+        0,0,0,0,NULL,NULL,h,NULL);
+    if(!dispatchWindow)goto shutdown;
     hotRegistered=bind_hotkey(hotMods,hotKey);
-    key_status();
-    if(wcscmp(cmd,L"--background")!=0)ShowWindow(mainWindow,SW_SHOW);
+    if(wcscmp(cmd,L"--background")!=0&&!show_settings()){
+        DestroyWindow(dispatchWindow);
+        goto shutdown;
+    }
     MSG m;
-    while(GetMessageW(&m,NULL,0,0)>0){
+    BOOL result;
+    while((result=GetMessageW(&m,NULL,0,0))>0){
         if(IsWindowVisible(mainWindow)&&GetAncestor(m.hwnd,GA_ROOT)==mainWindow&&IsDialogMessageW(mainWindow,&m))continue;
         TranslateMessage(&m);DispatchMessageW(&m);
     }
+    exitCode=result==0?(int)m.wParam:1;
 shutdown:
     DeleteObject(font);
     CoUninitialize();
     CloseHandle(one);
-    return mainWindow?0:1;
+    return exitCode;
 }
 
 static void *longStitch;
@@ -1083,12 +1128,12 @@ static void start_long(RECT r){
 static const WCHAR recordClass[]=L"LightCaptureWindows.RecordingControl.v1";
 static void stop_recording(void){
     if(!lc_video_active())return;
-    KillTimer(mainWindow,2);
+    KillTimer(dispatchWindow,2);
     WCHAR why[1024]={0};
     BOOL ok=lc_video_stop(why,1024);
     if(IsWindow(recControl))DestroyWindow(recControl);
     recControl=NULL;
-    SetWindowTextW(captureButton,tr(L"开始截图",L"Start capture"));
+    if(captureButton)SetWindowTextW(captureButton,tr(L"开始截图",L"Start capture"));
     if(!ok)error_text(why[0]?why:tr(L"无法保存录屏。",L"Could not save the recording."));
 }
 static LRESULT CALLBACK rec_proc(HWND w,UINT m,WPARAM wp,LPARAM lp){
@@ -1111,13 +1156,12 @@ static void start_recording(RECT r){
         error_text(tr(L"无法创建录屏目录。",L"Could not create the recordings folder."));return;
     }
     if(IsWindow(overlay))DestroyWindow(overlay);
-    if(IsWindowVisible(mainWindow))ShowWindow(mainWindow,SW_HIDE);
+    close_settings();
     DwmFlush();
     if(!lc_video_start(r,videoEdge,videoFps,videoSystem,videoMic,path,why,1024)){
         error_text(why[0]?why:tr(L"无法开始录屏。",L"Could not start the recording."));return;
     }
-    SetWindowTextW(captureButton,tr(L"停止并保存录屏",L"Stop and save recording"));
-    SetTimer(mainWindow,2,500,NULL);
+    SetTimer(dispatchWindow,2,500,NULL);
     WNDCLASSEXW c={.cbSize=sizeof(c),.lpfnWndProc=rec_proc,.hInstance=instance,
       .hCursor=LoadCursor(NULL,IDC_ARROW),.hbrBackground=(HBRUSH)(COLOR_WINDOW+1),.lpszClassName=recordClass};
     if(!RegisterClassExW(&c)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return;
